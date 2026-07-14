@@ -13,6 +13,7 @@ final class WindowCapture: NSObject {
     private var stream: SCStream?
 
     var onError: ((Error) -> Void)?
+    var onFrameDelivered: (() -> Void)?
 
     init(renderer: SampleBufferRendering) {
         self.renderer = renderer
@@ -62,6 +63,7 @@ extension WindowCapture: SCStreamOutput {
 
         DispatchQueue.main.async { [weak self] in
             self?.renderer?.display(sampleBuffer)
+            self?.onFrameDelivered?()
         }
     }
 }

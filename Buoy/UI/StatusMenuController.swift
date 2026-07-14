@@ -98,6 +98,8 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             submenu.addItem(disabledItem(message))
         case .loaded(let windows):
             let pinnedIDs = Set(pinManager.sessions.map(\.source.windowID))
+            submenu.addItem(disabledItem("Hold Option for a Detached Float"))
+            submenu.addItem(.separator())
             for window in windows {
                 let item = NSMenuItem(
                     title: "\(window.owningAppName) - \(window.displayTitle)",
@@ -111,6 +113,18 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
                     item.state = .on
                 }
                 submenu.addItem(item)
+
+                let alternateItem = NSMenuItem(
+                    title: "Float \(window.owningAppName) - \(window.displayTitle)",
+                    action: #selector(floatWindow(_:)),
+                    keyEquivalent: ""
+                )
+                alternateItem.target = self
+                alternateItem.representedObject = NSNumber(value: window.windowID)
+                alternateItem.isEnabled = !pinnedIDs.contains(window.windowID)
+                alternateItem.isAlternate = true
+                alternateItem.keyEquivalentModifierMask = [.option]
+                submenu.addItem(alternateItem)
             }
         }
     }
@@ -127,7 +141,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
         for session in pinManager.sessions {
             let item = NSMenuItem(
-                title: "Unpin \(session.source.owningAppName) - \(session.source.displayTitle)",
+                title: "Unpin \(session.mode.menuLabel): \(session.source.owningAppName) - \(session.source.displayTitle)",
                 action: #selector(unpinWindow(_:)),
                 keyEquivalent: ""
             )
@@ -146,13 +160,24 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     @objc private func pinWindow(_ sender: NSMenuItem) {
         guard permissionsManager.ensureScreenRecordingAccess() else { return }
-        guard let number = sender.representedObject as? NSNumber else { return }
-        let windowID = CGWindowID(number.uint32Value)
-        guard let window = availableWindows[windowID] else { return }
+        guard permissionsManager.ensureAccessibilityAccess() else { return }
+        startPin(from: sender, mode: .pinnedInPlace)
+    }
+
+    @objc private func floatWindow(_ sender: NSMenuItem) {
+        guard permissionsManager.ensureScreenRecordingAccess() else { return }
+        startPin(from: sender, mode: .detached)
+    }
+
+    private func startPin(from sender: NSMenuItem, mode: PinMode) {
+        guard let number = sender.representedObject as? NSNumber,
+              let window = availableWindows[CGWindowID(number.uint32Value)] else {
+            return
+        }
 
         Task { @MainActor [weak self] in
             do {
-                try await self?.pinManager.pin(window)
+                try await self?.pinManager.pin(window, mode: mode)
             } catch {
                 self?.presentPinError(error)
             }

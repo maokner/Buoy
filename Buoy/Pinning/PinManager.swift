@@ -9,18 +9,17 @@ final class PinManager {
 
     private init() {}
 
-    func pin(_ window: WindowDescriptor) async throws {
+    func pin(_ window: WindowDescriptor, mode: PinMode = .pinnedInPlace) async throws {
         guard !sessions.contains(where: { $0.source.windowID == window.windowID }) else { return }
 
-        let session = PinSession(source: window)
+        let session = PinSession(source: window, mode: mode)
         session.panel.onClose = { [weak self, weak session] in
             guard let session else { return }
             self?.unpin(sessionID: session.id)
         }
-        session.capture.onError = { [weak self, weak session] error in
-            guard let self, let session else { return }
-            self.presentCaptureError(error, for: session)
-            self.unpin(sessionID: session.id)
+        session.onSourceClosed = { [weak self, weak session] in
+            guard let session else { return }
+            self?.unpin(sessionID: session.id)
         }
 
         do {
@@ -53,14 +52,4 @@ final class PinManager {
         }
     }
 
-    private func presentCaptureError(_ error: Error, for session: PinSession) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Capture Stopped"
-        alert.informativeText = "Buoy stopped mirroring \(session.source.displayTitle): \(error.localizedDescription)"
-        alert.addButton(withTitle: "OK")
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
-    }
 }
-

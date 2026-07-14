@@ -30,6 +30,11 @@ final class PermissionsManager {
         CGRequestScreenCaptureAccess()
     }
 
+    func requestAccessibilityAccess() -> Bool {
+        let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        return AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary)
+    }
+
     func openScreenRecordingSettings() {
         NSWorkspace.shared.open(SettingsURL.screenRecording)
     }
@@ -55,6 +60,25 @@ final class PermissionsManager {
             message: "Buoy needs Screen Recording access before it can create a live window mirror."
         )
         return hasScreenRecordingAccess
+    }
+
+    func ensureAccessibilityAccess() -> Bool {
+        guard !hasAccessibilityAccess else { return true }
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Allow Accessibility"
+        alert.informativeText = "Pin in Place needs Accessibility access to track and raise the window you choose. Detached floats do not need this permission."
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Not Now")
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        _ = requestAccessibilityAccess()
+        if !hasAccessibilityAccess {
+            openAccessibilitySettings()
+        }
+        return hasAccessibilityAccess
     }
 
     func presentPermissions() {
@@ -112,4 +136,3 @@ final class PermissionsManager {
         granted ? "Granted" : "Not granted"
     }
 }
-

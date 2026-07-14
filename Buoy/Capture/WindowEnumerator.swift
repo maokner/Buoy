@@ -6,6 +6,7 @@ struct WindowDescriptor {
     let owningAppName: String
     let window: SCWindow
     let windowID: CGWindowID
+    let processID: pid_t
     let frame: CGRect
 }
 
@@ -47,6 +48,7 @@ struct WindowEnumerator {
                 owningAppName: appName,
                 window: window,
                 windowID: window.windowID,
+                processID: application.processID,
                 frame: window.frame
             )
         }
@@ -59,4 +61,3 @@ struct WindowEnumerator {
         }
     }
 }
-
