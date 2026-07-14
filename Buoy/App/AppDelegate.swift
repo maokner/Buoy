@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        statusMenuController?.shutdown()
         pinManager.stopAll()
     }
 }
-

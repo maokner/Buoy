@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 enum PinMode {
     case detached
@@ -13,7 +13,7 @@ enum PinMode {
 }
 
 @MainActor
-final class PinSession {
+final class PinSession: NSObject, NSWindowDelegate {
     let id = UUID()
     let source: WindowDescriptor
     let capture: WindowCapture
@@ -27,11 +27,14 @@ final class PinSession {
     private var lastFrameDate = Date()
     private var sourceIsMinimized = false
     private var captureIsStalled = false
+    private var geometrySaveTimer: Timer?
+    private(set) var isClickThrough = false
 
     var opacity: CGFloat {
         didSet {
             opacity = min(max(opacity, 0.15), 1)
             panel.setCaptureStalled(captureIsStalled, baseOpacity: opacity)
+            PinPreferences.shared.setOpacity(opacity, for: source)
         }
     }
 
@@ -46,6 +49,15 @@ final class PinSession {
         )
         panel.alphaValue = opacity
         capture = WindowCapture(renderer: panel.captureView)
+        super.init()
+
+        if mode == .detached,
+           let restoredFrame = PinPreferences.shared.detachedFrame(for: source) {
+            panel.setFrame(restoredFrame, display: false)
+        }
+        if mode == .detached {
+            panel.delegate = self
+        }
     }
 
     func start() async throws {
@@ -82,12 +94,17 @@ final class PinSession {
             interactionRouter = router
         }
 
-        panel.orderFrontRegardless()
+        if mode == .detached {
+            panel.orderFrontRegardless()
+        }
     }
 
     func stop() async {
+        savePersistentState()
         stallTimer?.invalidate()
         stallTimer = nil
+        geometrySaveTimer?.invalidate()
+        geometrySaveTimer = nil
         interactionRouter?.stopRouting()
         interactionRouter = nil
         windowTracker?.stopTracking()
@@ -97,6 +114,26 @@ final class PinSession {
         panel.orderOut(nil)
         panel.close()
         await capture.stop()
+    }
+
+    func setClickThrough(_ enabled: Bool) {
+        guard mode == .detached else { return }
+        isClickThrough = enabled
+        panel.ignoresMouseEvents = enabled
+    }
+
+    func savePersistentState() {
+        PinPreferences.shared.setOpacity(opacity, for: source)
+        guard mode == .detached else { return }
+        PinPreferences.shared.setDetachedFrame(panel.frame, for: source)
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        scheduleGeometrySave()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        scheduleGeometrySave()
     }
 
     private func handleFrameDelivered() {
@@ -134,5 +171,19 @@ final class PinSession {
         guard captureIsStalled != isStalled else { return }
         captureIsStalled = isStalled
         panel.setCaptureStalled(isStalled, baseOpacity: opacity)
+    }
+
+    private func scheduleGeometrySave() {
+        guard mode == .detached else { return }
+        geometrySaveTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.5, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.savePersistentState()
+                self.geometrySaveTimer = nil
+            }
+        }
+        geometrySaveTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 }

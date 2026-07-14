@@ -12,7 +12,7 @@ final class InteractionRouter: InteractionRouting {
     private weak var panel: PinOverlayPanel?
     private weak var tracker: WindowTracker?
     private var activationObserver: NSObjectProtocol?
-    private var overlayIsHidden = false
+    private var overlayIsHidden = true
     private var raiseInProgress = false
 
     init(sourceProcessID: pid_t, panel: PinOverlayPanel, tracker: WindowTracker) {
@@ -41,6 +41,13 @@ final class InteractionRouter: InteractionRouting {
                 }
                 self.handleApplicationActivation(processID: application.processIdentifier)
             }
+        }
+
+        if tracker?.sourceWindowIsFocused() == true {
+            overlayIsHidden = true
+            panel?.orderOut(nil)
+        } else {
+            showOverlay()
         }
     }
 

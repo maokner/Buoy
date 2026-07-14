@@ -7,7 +7,12 @@ struct WindowDescriptor {
     let window: SCWindow
     let windowID: CGWindowID
     let processID: pid_t
+    let owningAppBundleIdentifier: String?
     let frame: CGRect
+
+    var persistenceAppIdentifier: String {
+        owningAppBundleIdentifier ?? owningAppName
+    }
 }
 
 enum WindowEnumerationError: LocalizedError {
@@ -22,6 +27,10 @@ enum WindowEnumerationError: LocalizedError {
 }
 
 struct WindowEnumerator {
+    func window(withID windowID: CGWindowID) async throws -> WindowDescriptor? {
+        try await windows().first(where: { $0.windowID == windowID })
+    }
+
     func windows() async throws -> [WindowDescriptor] {
         let content: SCShareableContent
         do {
@@ -40,6 +49,9 @@ struct WindowEnumerator {
 
             let appName = application.applicationName.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !appName.isEmpty else { return nil }
+            let rawBundleIdentifier = application.bundleIdentifier
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let bundleIdentifier = rawBundleIdentifier.isEmpty ? nil : rawBundleIdentifier
 
             let rawTitle = window.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let displayTitle = rawTitle.isEmpty ? "Untitled Window" : rawTitle
@@ -49,6 +61,7 @@ struct WindowEnumerator {
                 window: window,
                 windowID: window.windowID,
                 processID: application.processID,
+                owningAppBundleIdentifier: bundleIdentifier,
                 frame: window.frame
             )
         }

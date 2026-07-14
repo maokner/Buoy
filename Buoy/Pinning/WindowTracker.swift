@@ -1,12 +1,6 @@
 import AppKit
 import ApplicationServices
 
-@_silgen_name("_AXUIElementGetWindow")
-private func _AXUIElementGetWindow(
-    _ element: AXUIElement,
-    _ windowID: UnsafeMutablePointer<CGWindowID>
-) -> AXError
-
 @MainActor
 protocol WindowTracking: AnyObject {
     func startTracking()
@@ -127,7 +121,9 @@ final class WindowTracker: WindowTracking {
         ) else {
             return nil
         }
-        guard let focusedWindowID = windowID(of: focusedElement) else { return nil }
+        guard let focusedWindowID = AccessibilityWindowResolver.windowID(of: focusedElement) else {
+            return nil
+        }
         return focusedWindowID == source.windowID
     }
 
@@ -179,23 +175,29 @@ final class WindowTracker: WindowTracking {
         )
         guard creationResult == .success, let observer else { return false }
 
+        var addedNotifications: [CFString] = []
         for notification in Self.windowNotifications {
-            guard AXObserverAddNotification(
+            let result = AXObserverAddNotification(
                 observer,
                 element,
                 notification,
                 Unmanaged.passUnretained(self).toOpaque()
-            ) == .success else {
+            )
+            guard result == .success else {
+                removeNotifications(addedNotifications, from: element, observer: observer)
                 return false
             }
+            addedNotifications.append(notification)
         }
 
-        guard AXObserverAddNotification(
+        let focusResult = AXObserverAddNotification(
             observer,
             applicationElement,
             kAXFocusedWindowChangedNotification as CFString,
             Unmanaged.passUnretained(self).toOpaque()
-        ) == .success else {
+        )
+        guard focusResult == .success else {
+            removeNotifications(addedNotifications, from: element, observer: observer)
             return false
         }
 
@@ -208,6 +210,16 @@ final class WindowTracker: WindowTracking {
         return true
     }
 
+    private func removeNotifications(
+        _ notifications: [CFString],
+        from element: AXUIElement,
+        observer: AXObserver
+    ) {
+        for notification in notifications {
+            AXObserverRemoveNotification(observer, element, notification)
+        }
+    }
+
     private func findSourceWindowElement() -> AXUIElement? {
         guard let windows = copyElementArrayAttribute(
             applicationElement,
@@ -216,7 +228,9 @@ final class WindowTracker: WindowTracking {
             return nil
         }
 
-        if let exactMatch = windows.first(where: { windowID(of: $0) == source.windowID }) {
+        if let exactMatch = windows.first(where: {
+            AccessibilityWindowResolver.windowID(of: $0) == source.windowID
+        }) {
             return exactMatch
         }
 
@@ -313,12 +327,6 @@ final class WindowTracker: WindowTracking {
         return (frontWindow[kCGWindowNumber as String] as? NSNumber)?.uint32Value == source.windowID
     }
 
-    private func windowID(of element: AXUIElement) -> CGWindowID? {
-        var identifier = CGWindowID(0)
-        guard _AXUIElementGetWindow(element, &identifier) == .success else { return nil }
-        return identifier
-    }
-
     private func axFrame(of element: AXUIElement) -> CGRect? {
         guard let position = copyPointAttribute(
             element,
@@ -376,8 +384,11 @@ private func copyElementAttribute(
     attribute: CFString
 ) -> AXUIElement? {
     var value: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else { return nil }
-    return value as! AXUIElement?
+    guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+          let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
+        return nil
+    }
+    return value as! AXUIElement
 }
 
 private func copyStringAttribute(
