@@ -5,7 +5,7 @@
 Buoy is a free, open-source macOS menu bar utility that keeps any window floating above everything else, and still lets you use it.
 Keep your terminal visible while you code in another app, your requirements doc above your editor, or your music player above everything.
 
-<!-- demo GIF goes here before release -->
+![A TextEdit window pinned by Buoy floating above a Finder window, with the Buoy hover strip and unpin control visible](docs/hero.png)
 
 ## Why this exists
 
