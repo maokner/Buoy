@@ -28,7 +28,17 @@ The result feels like the real window is always on top, because whenever you int
 
 ## Install
 
+### Homebrew
+
+```sh
+brew install --cask maokner/tap/buoy
+```
+
+### Direct download
+
 Download the latest `Buoy.dmg` from [Releases](../../releases), open it, and drag Buoy to Applications.
+
+### First launch
 
 Buoy is free and unsigned (no 99 dollar Apple Developer account behind it), so the first launch needs one extra step:
 
@@ -40,6 +50,8 @@ Or, if you prefer the terminal:
 ```sh
 xattr -dr com.apple.quarantine /Applications/Buoy.app
 ```
+
+Homebrew users can skip the quarantine flag at install time instead: `brew install --cask maokner/tap/buoy --no-quarantine`.
 
 ### Permissions
 
