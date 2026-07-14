@@ -4,12 +4,15 @@ import Carbon
 final class HotkeyManager {
     var onHotkeyPressed: (() -> Void)?
     private(set) var isInstalled = false
+    private(set) var binding: HotkeyBinding?
 
     private var hotkeyReference: EventHotKeyRef?
     private var handlerReference: EventHandlerRef?
 
-    func install() {
-        guard !isInstalled else { return }
+    func install(binding: HotkeyBinding?) {
+        uninstall()
+        self.binding = binding
+        guard let binding else { return }
 
         var eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
@@ -27,8 +30,8 @@ final class HotkeyManager {
 
         let identifier = EventHotKeyID(signature: Self.signature, id: 1)
         let registrationStatus = RegisterEventHotKey(
-            UInt32(kVK_ANSI_P),
-            UInt32(optionKey | cmdKey),
+            binding.keyCode,
+            binding.carbonModifiers,
             identifier,
             GetApplicationEventTarget(),
             0,

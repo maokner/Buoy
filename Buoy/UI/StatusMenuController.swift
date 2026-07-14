@@ -12,16 +12,29 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private let pinManager: PinManager
     private let permissionsManager: PermissionsManager
+    private let preferences = PinPreferences.shared
     private let windowEnumerator = WindowEnumerator()
+    private let thumbnailProvider = WindowThumbnailProvider()
     private let hotkeyManager = HotkeyManager()
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
+    private lazy var pickerController = WindowPickerController(
+        pinManager: pinManager,
+        permissionsManager: permissionsManager
+    )
+    private lazy var settingsController = SettingsWindowController(preferences: preferences)
     private var availableWindows: [CGWindowID: WindowDescriptor] = [:]
     private var enumerationGeneration = 0
     private var windowState: WindowState = .loading
+    private var hotkeyObserver: NSObjectProtocol?
 
     var isHotkeyInstalled: Bool {
         hotkeyManager.isInstalled
+    }
+
+    var hotkeyStatusText: String {
+        guard let binding = preferences.hotkeyBinding else { return "Disabled" }
+        return hotkeyManager.isInstalled ? binding.displayString : "\(binding.displayString) (Unavailable)"
     }
 
     init(pinManager: PinManager, permissionsManager: PermissionsManager) {
@@ -37,7 +50,25 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         hotkeyManager.onHotkeyPressed = { [weak self] in
             self?.toggleFrontmostWindow()
         }
-        hotkeyManager.install()
+        hotkeyManager.install(binding: preferences.hotkeyBinding)
+        hotkeyObserver = NotificationCenter.default.addObserver(
+            forName: .buoyHotkeyChanged,
+            object: preferences,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.hotkeyManager.install(binding: self.preferences.hotkeyBinding)
+                self.buildMenu(windowState: self.windowState)
+            }
+        }
+
+        pickerController.onPinError = { [weak self] error in
+            self?.presentPinError(error)
+        }
+        pickerController.onWindowUnavailable = { [weak self] in
+            self?.presentFrontmostError()
+        }
         pinManager.onSessionsChanged = { [weak self] in
             guard let self else { return }
             self.buildMenu(windowState: self.windowState)
@@ -79,32 +110,49 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         menu.removeAllItems()
         updateStatusItem()
 
-        let pinItem = NSMenuItem(title: "Pin a Window", action: nil, keyEquivalent: "")
-        pinItem.image = menuSymbol("pin", description: "Pin a Window")
-        let pinSubmenu = NSMenu(title: "Pin a Window")
-        pinSubmenu.autoenablesItems = false
-        populatePinSubmenu(pinSubmenu, state: windowState)
-        pinItem.submenu = pinSubmenu
-        menu.addItem(pinItem)
+        let frontmostItem = NSMenuItem(
+            title: "Pin Frontmost Window",
+            action: #selector(toggleFrontmostWindow),
+            keyEquivalent: preferences.hotkeyBinding?.keyEquivalent ?? ""
+        )
+        frontmostItem.target = self
+        frontmostItem.keyEquivalentModifierMask = preferences.hotkeyBinding?.menuModifierMask ?? []
+        frontmostItem.image = menuSymbol("pin.badge.plus", description: "Pin Frontmost Window")
+        menu.addItem(frontmostItem)
 
+        let pickerItem = NSMenuItem(
+            title: "Pin a Window...",
+            action: #selector(beginPicker),
+            keyEquivalent: ""
+        )
+        pickerItem.target = self
+        pickerItem.image = menuSymbol("viewfinder", description: "Pin a Window")
+        menu.addItem(pickerItem)
+
+        let chooseItem = NSMenuItem(title: "Choose from List", action: nil, keyEquivalent: "")
+        chooseItem.image = menuSymbol("list.bullet.rectangle", description: "Choose from List")
+        let chooseSubmenu = NSMenu(title: "Choose from List")
+        chooseSubmenu.autoenablesItems = false
+        populateWindowList(chooseSubmenu, state: windowState)
+        chooseItem.submenu = chooseSubmenu
+        menu.addItem(chooseItem)
+
+        addRecentWindows(from: windowState)
         menu.addItem(.separator())
         addActivePins()
         menu.addItem(.separator())
 
-        let frontmostItem = NSMenuItem(
-            title: "Pin Frontmost Window",
-            action: #selector(toggleFrontmostWindow),
-            keyEquivalent: "p"
+        let settingsItem = NSMenuItem(
+            title: "Settings...",
+            action: #selector(showSettings),
+            keyEquivalent: ","
         )
-        frontmostItem.target = self
-        frontmostItem.keyEquivalentModifierMask = [.option, .command]
-        frontmostItem.image = menuSymbol("pin.badge.plus", description: "Pin Frontmost Window")
-        menu.addItem(frontmostItem)
-
-        menu.addItem(.separator())
+        settingsItem.target = self
+        settingsItem.image = menuSymbol("gearshape", description: "Settings")
+        menu.addItem(settingsItem)
 
         let permissionsItem = NSMenuItem(
-            title: "Permissions…",
+            title: "Permissions...",
             action: #selector(showPermissions),
             keyEquivalent: ""
         )
@@ -126,7 +174,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         menu.addItem(quitItem)
     }
 
-    private func populatePinSubmenu(_ submenu: NSMenu, state: WindowState) {
+    private func populateWindowList(_ submenu: NSMenu, state: WindowState) {
         submenu.addItem(disabledItem("Hold Option to float instead"))
         submenu.addItem(.separator())
 
@@ -151,35 +199,80 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             let pinnedIDs = Set(pinManager.sessions.map(\.source.windowID))
             for window in windows {
                 let isPinned = pinnedIDs.contains(window.windowID)
-                let item = NSMenuItem(
-                    title: "\(window.owningAppName) - \(window.displayTitle)",
-                    action: #selector(pinWindow(_:)),
-                    keyEquivalent: ""
-                )
-                item.target = self
-                item.representedObject = NSNumber(value: window.windowID)
-                item.isEnabled = !isPinned
-                item.state = isPinned ? .on : .off
+                let item = windowMenuItem(window, mode: .pinnedInPlace, isPinned: isPinned)
                 submenu.addItem(item)
 
-                let alternateItem = NSMenuItem(
-                    title: "Float \(window.owningAppName) - \(window.displayTitle)",
-                    action: #selector(floatWindow(_:)),
-                    keyEquivalent: ""
-                )
-                alternateItem.target = self
-                alternateItem.representedObject = NSNumber(value: window.windowID)
-                alternateItem.isEnabled = !isPinned
+                let alternateItem = windowMenuItem(window, mode: .detached, isPinned: isPinned)
+                alternateItem.title = "Float \(window.owningAppName) - \(window.displayTitle)"
                 alternateItem.isAlternate = true
                 alternateItem.keyEquivalentModifierMask = [.option]
                 submenu.addItem(alternateItem)
+                populateThumbnail(for: window, primaryItem: item, alternateItem: alternateItem)
             }
+        }
+    }
+
+    private func windowMenuItem(
+        _ window: WindowDescriptor,
+        mode: PinMode,
+        isPinned: Bool
+    ) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: "\(window.owningAppName) - \(window.displayTitle)",
+            action: mode == .pinnedInPlace ? #selector(pinWindow(_:)) : #selector(floatWindow(_:)),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.representedObject = NSNumber(value: window.windowID)
+        item.isEnabled = !isPinned
+        item.state = isPinned ? .on : .off
+        return item
+    }
+
+    private func populateThumbnail(
+        for window: WindowDescriptor,
+        primaryItem: NSMenuItem,
+        alternateItem: NSMenuItem
+    ) {
+        Task { @MainActor [weak primaryItem, weak alternateItem, weak self] in
+            guard let self, let image = await thumbnailProvider.thumbnail(for: window) else { return }
+            primaryItem?.image = image
+            alternateItem?.image = image
+        }
+    }
+
+    private func addRecentWindows(from state: WindowState) {
+        guard case .loaded(let windows) = state else { return }
+        var usedWindowIDs: Set<CGWindowID> = []
+        let recentDescriptors = preferences.recentWindows.compactMap { identity in
+            windows.first { descriptor in
+                descriptor.persistenceAppIdentifier == identity.appIdentifier
+                    && descriptor.displayTitle == identity.windowTitle
+                    && !usedWindowIDs.contains(descriptor.windowID)
+            }.map { descriptor in
+                usedWindowIDs.insert(descriptor.windowID)
+                return descriptor
+            }
+        }
+        .prefix(3)
+
+        guard !recentDescriptors.isEmpty else { return }
+        menu.addItem(sectionHeader("Recent"))
+        let pinnedIDs = Set(pinManager.sessions.map(\.source.windowID))
+        for descriptor in recentDescriptors {
+            let item = windowMenuItem(
+                descriptor,
+                mode: .pinnedInPlace,
+                isPinned: pinnedIDs.contains(descriptor.windowID)
+            )
+            item.indentationLevel = 1
+            item.image = menuSymbol("clock", description: "Recent Window")
+            menu.addItem(item)
         }
     }
 
     private func addActivePins() {
         menu.addItem(sectionHeader("Active Pins"))
-
         guard !pinManager.sessions.isEmpty else {
             let noneItem = disabledItem("None yet")
             noneItem.indentationLevel = 1
@@ -204,7 +297,6 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     private func activePinSubmenu(for session: PinSession) -> NSMenu {
         let submenu = NSMenu(title: session.source.displayTitle)
         submenu.autoenablesItems = false
-
         submenu.addItem(sectionHeader("Opacity"))
         let opacityItem = NSMenuItem()
         opacityItem.view = OpacityMenuItemView(session: session)
@@ -250,14 +342,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private func updateStatusItem() {
         let pinCount = pinManager.sessions.count
-        let symbolName = pinCount == 0 ? "pin" : "pin.fill"
-        let configuration = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
-        let image = NSImage(
-            systemSymbolName: symbolName,
-            accessibilityDescription: "Buoy"
-        )?.withSymbolConfiguration(configuration)
-        image?.isTemplate = true
-        statusItem.button?.image = image
+        statusItem.button?.image = BuoyGlyph.image(pointSize: 18, active: pinCount > 0)
         statusItem.button?.toolTip = pinCount == 0 ? "Buoy" : "Buoy - \(pinCount) pinned"
     }
 
@@ -289,6 +374,12 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         return item
     }
 
+    @objc private func beginPicker() {
+        DispatchQueue.main.async { [weak self] in
+            self?.pickerController.begin()
+        }
+    }
+
     @objc private func pinWindow(_ sender: NSMenuItem) {
         guard permissionsManager.ensureScreenRecordingAccess() else { return }
         guard permissionsManager.ensureAccessibilityAccess() else { return }
@@ -302,10 +393,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
 
     private func startPin(from sender: NSMenuItem, mode: PinMode) {
         guard let number = sender.representedObject as? NSNumber,
-              let window = availableWindows[CGWindowID(number.uint32Value)] else {
-            return
-        }
-
+              let window = availableWindows[CGWindowID(number.uint32Value)] else { return }
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -329,9 +417,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     @objc private func toggleClickThrough(_ sender: NSMenuItem) {
         guard let id = sessionID(from: sender),
               let session = pinManager.session(withID: id),
-              session.mode == .detached else {
-            return
-        }
+              session.mode == .detached else { return }
         let enabled = !session.isClickThrough
         session.setClickThrough(enabled)
         sender.state = enabled ? .on : .off
@@ -348,7 +434,6 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             presentFrontmostError()
             return
         }
-
         guard permissionsManager.hasAccessibilityAccess else {
             _ = permissionsManager.ensureAccessibilityAccess()
             return
@@ -359,7 +444,6 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
             presentFrontmostError()
             return
         }
-
         if let session = pinManager.session(forWindowID: windowID) {
             pinManager.unpin(sessionID: session.id)
             return
@@ -381,7 +465,16 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     func shutdown() {
+        pickerController.cancel()
         hotkeyManager.uninstall()
+        if let hotkeyObserver {
+            NotificationCenter.default.removeObserver(hotkeyObserver)
+            self.hotkeyObserver = nil
+        }
+    }
+
+    @objc private func showSettings() {
+        settingsController.present()
     }
 
     @objc private func openScreenRecordingSettings() {
@@ -396,16 +489,13 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let credits = NSMutableAttributedString(
             string: "Keeps any window on top with a live mirror.\nFree and open source.\n"
         )
-        let linkTitle = "github.com/maokner/Buoy"
-        let link = NSAttributedString(
-            string: linkTitle,
+        credits.append(NSAttributedString(
+            string: "github.com/maokner/Buoy",
             attributes: [
                 .link: URL(string: "https://github.com/maokner/Buoy")!,
                 .foregroundColor: NSColor.linkColor,
             ]
-        )
-        credits.append(link)
-
+        ))
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationIcon: BuoyGlyph.image(pointSize: 64),
@@ -438,7 +528,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         presentAlert(
             style: .informational,
             message: "Nothing to pin",
-            information: "Buoy could not find a window to pin. Click the window you want on top, then press Option-Command-P."
+            information: "Buoy could not find a window to pin. Click the window you want on top, then use your Pin Frontmost Window shortcut."
         )
     }
 

@@ -23,7 +23,8 @@ The result feels like the real window is always on top, because whenever you int
 - **Detached float** (hold Option when picking a window): a movable, resizable live thumbnail you can park anywhere.
   Great for keeping an eye on builds, dashboards, or video.
   Supports click-through, remembers its position and opacity per app.
-- **Global hotkey**: Option-Command-P pins or unpins whatever window you are using.
+- **Point-and-click picker**: Choose **Pin a Window...**, point at any visible window, and click. Hold Option while clicking for a detached float.
+- **Global hotkey**: Option-Shift-P pins or unpins whatever window you are using by default. Change or disable it in **Settings...**.
 - **Per-pin opacity** from the menu bar, live.
 
 ## Install

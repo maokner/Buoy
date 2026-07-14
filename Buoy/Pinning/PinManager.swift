@@ -54,6 +54,7 @@ final class PinManager {
         do {
             try await session.start()
             sessions.append(session)
+            PinPreferences.shared.recordRecent(window)
             notifySessionsChanged()
             return .created
         } catch {

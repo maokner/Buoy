@@ -9,7 +9,7 @@ final class ControlWindowController: NSWindowController, NSTableViewDataSource, 
 
     private let pinManager: PinManager
     private let permissionsManager: PermissionsManager
-    private let hotkeyIsInstalled: () -> Bool
+    private let hotkeyStatus: () -> String
     private let windowEnumerator = WindowEnumerator()
 
     private var availableWindows: [WindowDescriptor] = []
@@ -34,15 +34,16 @@ final class ControlWindowController: NSWindowController, NSTableViewDataSource, 
     private let statusLabel = NSTextField(wrappingLabelWithString: "Ready")
 
     private var sessionObserver: NSObjectProtocol?
+    private var hotkeyObserver: NSObjectProtocol?
 
     init(
         pinManager: PinManager,
         permissionsManager: PermissionsManager,
-        hotkeyIsInstalled: @escaping () -> Bool
+        hotkeyStatus: @escaping () -> String
     ) {
         self.pinManager = pinManager
         self.permissionsManager = permissionsManager
-        self.hotkeyIsInstalled = hotkeyIsInstalled
+        self.hotkeyStatus = hotkeyStatus
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 760, height: 660),
@@ -65,6 +66,15 @@ final class ControlWindowController: NSWindowController, NSTableViewDataSource, 
                 self?.reloadActivePins()
             }
         }
+        hotkeyObserver = NotificationCenter.default.addObserver(
+            forName: .buoyHotkeyChanged,
+            object: PinPreferences.shared,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshPermissionState()
+            }
+        }
         refreshPermissionState()
         refreshWindows()
     }
@@ -76,6 +86,9 @@ final class ControlWindowController: NSWindowController, NSTableViewDataSource, 
     deinit {
         if let sessionObserver {
             NotificationCenter.default.removeObserver(sessionObserver)
+        }
+        if let hotkeyObserver {
+            NotificationCenter.default.removeObserver(hotkeyObserver)
         }
     }
 
@@ -255,7 +268,7 @@ final class ControlWindowController: NSWindowController, NSTableViewDataSource, 
     private func refreshPermissionState() {
         screenPermissionLabel.stringValue = "Screen Recording: \(permissionsManager.hasScreenRecordingAccess ? "Granted" : "Not Granted")"
         accessibilityPermissionLabel.stringValue = "Accessibility: \(permissionsManager.hasAccessibilityAccess ? "Granted" : "Not Granted")"
-        hotkeyStatusLabel.stringValue = "Global Hotkey: \(hotkeyIsInstalled() ? "Registered" : "Unavailable")"
+        hotkeyStatusLabel.stringValue = "Global Hotkey: \(hotkeyStatus())"
     }
 
     private func refreshWindows() {

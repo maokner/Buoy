@@ -13,7 +13,7 @@ It follows the macOS HIG for menus, alerts, and title-case menu items.
 Nothing here should feel like a cross-platform toolkit.
 
 2. Zero configuration to first success.
-There is no settings window, no preferences pane, no account.
+The default shortcut and picker work without setup, there is no account, and shortcut customization stays in one small Settings window.
 The path from launch to a floating window is a menu click plus one system permission.
 
 3. Confident, friendly, terse copy.
@@ -37,23 +37,17 @@ Use "Float" in menu items and "detached float" only in longer explanatory copy.
 ## 1. Menu bar icon
 
 Buoy is a menu-bar-only app (`NSApp.setActivationPolicy(.accessory)`, no Dock icon).
-The status item uses a template image so macOS tints it for light and dark menu bars automatically (`image?.isTemplate = true`).
+The status item uses the custom Tidemark template image so macOS tints it for light and dark menu bars automatically (`image.isTemplate = true`).
 
-| State | SF Symbol | Rationale |
-|-------|-----------|-----------|
-| Idle (no active pins) | `pin` | Clean, unfilled pin. Reads as "ready", low visual weight. |
-| Has one or more active pins | `pin.fill` | Filled variant signals "something is pinned right now" at a glance without a badge or color. |
+Tidemark is a sphere divided by a horizontal wave-shaped negative-space gap.
+Its source geometry is a 21.2 unit diameter circle centered at `(16, 16)` and a cleared 3.2 unit wave stroke following `M2 17.4 q3.5 -3.6 7 0 t7 0 t7 0 t7 0` in a 32 unit canvas.
+Render it programmatically at 18pt with antialiasing so it remains crisp at 1x and 2x.
 
-Implementation notes:
-
-- Configure with a symbol configuration of `.init(pointSize: 15, weight: .regular)` so it optically matches system menu bar glyphs.
-- Rotate the pin slightly is not needed; use the upright symbol as shipped by SF Symbols.
-- Do not use color or a red dot for the active state. The fill swap is the whole signal and keeps the bar calm.
-- `button.toolTip` follows the state:
-  - Idle: `Buoy`
-  - Active: `Buoy - {n} pinned` (for example `Buoy - 2 pinned`). Singular `Buoy - 1 pinned`.
-
-The current code ships `pin.circle`; change idle to `pin` and add the `pin.fill` active swap in `StatusMenuController` when `pinManager.sessions` is non-empty.
+- Idle: show the unmodified split sphere.
+- Active: add one small centered solid dot inside the waterline gap.
+- Do not use color or a numeric badge.
+- `button.toolTip` is `Buoy` when idle and `Buoy - {n} pinned` when active.
+- Use the same Tidemark mark in the overlay hover strip and About panel so Buoy has one logo.
 
 ---
 
@@ -63,48 +57,77 @@ The menu is rebuilt on `menuWillOpen` and whenever sessions change.
 All items use title case per HIG.
 `menu.autoenablesItems = false` stays as-is; disabled rows are informational.
 
-### 2.1 Top-level skeleton (with active pins present)
+### 2.1 Top-level skeleton (with active pins and recent windows present)
 
 ```
-Pin a Window                         ▸        [submenu, symbol: pin]
+Pin Frontmost Window          ⌥⇧P            [symbol: pin.badge.plus]
+Pin a Window...                               [symbol: viewfinder]
+Choose from List                     ▸        [symbol: list.bullet.rectangle]
+Recent                                        (disabled section header, small)
+  Safari - Anthropic                         [symbol: clock]
+  Terminal - node                            [symbol: clock]
 ────────────────────────────────────
 Active Pins                                   (disabled section header, small)
   ◆ Figma - Untitled          ▸              [per-pin submenu, symbol: pin.fill]
   ◆ Terminal - node           ▸              [per-pin submenu, symbol: rectangle.on.rectangle]
 ────────────────────────────────────
-Pin Frontmost Window          ⌥⌘P            [symbol: pin.badge.plus]
-────────────────────────────────────
-Permissions…                                  [symbol: lock.shield]
+Settings...                                   [symbol: gearshape]
+Permissions...                                [symbol: lock.shield]
 About Buoy                                     [symbol: info.circle]
 Quit Buoy                     ⌘Q
 ```
 
 Notes on the skeleton:
 
-- The per-pin rows in "Active Pins" carry a leading SF Symbol that encodes the mode: `pin.fill` for pin-in-place, `rectangle.on.rectangle` for detached float. This lets the user tell the two modes apart in a scan.
+- Omit the Recent header and rows when none of the persisted identities match a currently available window.
+- Show no more than three recents, most recently pinned first.
+- The per-pin rows in "Active Pins" carry a leading SF Symbol that encodes the mode: `pin.fill` for pin-in-place, `rectangle.on.rectangle` for detached float.
 - Keep `indentationLevel = 1` on the pin rows under the "Active Pins" header, as the current code does.
 
 ### 2.2 Item-by-item spec
 
 Order top to bottom.
 
-1. **Pin a Window** - has submenu (section 2.3). Symbol `pin`. Always present, always enabled (the submenu handles empty and permission states).
-2. Separator.
-3. **Active Pins** - disabled header row. Symbol none. Followed by either the per-pin rows (section 2.4) or a single disabled `None` row indented one level.
-4. Separator.
-5. **Pin Frontmost Window** - symbol `pin.badge.plus`. Key equivalent `⌥⌘P` (`keyEquivalent = "p"`, `keyEquivalentModifierMask = [.option, .command]`). Triggers the same flow as the global hotkey. Disabled with a dimmed look only if there is no resolvable frontmost window is not knowable at menu-build time, so keep it enabled and let the action surface the error alert in section 5.
-6. Separator.
-7. **Permissions…** - symbol `lock.shield`. Opens the permissions status surface (section 4). Trailing ellipsis because it opens a further UI.
-8. **About Buoy** - symbol `info.circle`. Opens the standard `orderFrontStandardAboutPanel` with credits (see 2.6).
-9. **Quit Buoy** - key equivalent `⌘Q`. No symbol (standard Quit convention omits it).
+1. **Pin Frontmost Window** - symbol `pin.badge.plus`. The menu key equivalent always reflects the current saved shortcut. The default is `⌥⇧P`, and the item has no key equivalent when the shortcut is cleared.
+2. **Pin a Window...** - symbol `viewfinder`. Closes the menu and enters picker mode (section 2.3).
+3. **Choose from List** - symbol `list.bullet.rectangle`. Its submenu contains the existing window list and Option alternates (section 2.3.2).
+4. **Recent** - optional disabled header followed by up to three matching windows, newest first. Each row uses `clock` and starts a pin in place.
+5. Separator.
+6. **Active Pins** - disabled header row followed by the per-pin rows (section 2.4) or one disabled `None yet` row.
+7. Separator.
+8. **Settings...** - symbol `gearshape`. Opens the shortcut settings window. Use the standard Command-comma menu equivalent.
+9. **Permissions...** - symbol `lock.shield`. Opens the permissions status surface (section 6.4).
+10. **About Buoy** - symbol `info.circle`. Opens the standard About panel (section 2.6).
+11. **Quit Buoy** - key equivalent `⌘Q`. No symbol.
 
 SF Symbols on menu items are set via `item.image = NSImage(systemSymbolName:accessibilityDescription:)` with `isTemplate = true`.
 Use a consistent point size config of `.init(pointSize: 13, weight: .regular)` so all row glyphs align.
 
-### 2.3 "Pin a Window" submenu
+### 2.3 Window selection
 
-This submenu is the primary path to first success.
-It is rebuilt each time the menu opens, driven by `WindowState`.
+#### 2.3.1 "Pin a Window..." picker
+
+Picker mode is the primary visual path to first success.
+It creates one transparent, borderless, nonactivating overlay panel per connected screen at a high window level.
+The panels accept picker mouse events without activating Buoy or moving focus from the current app.
+
+On mouse movement, query `CGWindowListCopyWindowInfo` in front-to-back order and select the first eligible window containing the global pointer location.
+Eligible windows are layer 0, on screen, at least 80 by 50 points, visible, and not owned by Buoy.
+Convert Quartz top-left frames to Cocoa bottom-left frames using the global primary-screen top, matching `WindowTracker.cocoaFrame`.
+
+Draw a rounded accent-color stroke and faint accent fill over the selected frame.
+Show a compact tag near the pointer containing `{App} - {Window Title}` and the exact hint `Click to pin - hold Option to float - Esc to cancel`.
+Clamp the tag inside the owning screen.
+
+- A normal click consumes the picker event, tears down all picker panels, requests required permissions, and pins the selected window in place.
+- An Option-click consumes the event, tears down all picker panels, and creates a detached float.
+- Clicking the empty desktop or pressing Escape cancels and tears down every panel and event monitor.
+- Rebuild the per-screen panels when the screen configuration changes.
+- Keep the panels on all Spaces and exclude every Buoy-owned window from hit testing.
+
+#### 2.3.2 "Choose from List" submenu
+
+This submenu is rebuilt each time the menu opens, driven by `WindowState`.
 
 Header hint (always the first row, disabled):
 
@@ -125,6 +148,10 @@ Window list rows (one primary + one hidden alternate per window):
 - Alternate row (shown while Option is held): `Float {App} - {Window Title}`.
   - `isAlternate = true`, `keyEquivalentModifierMask = [.option]`.
   - Action: detached float.
+
+Rows appear immediately with their titles.
+Populate a live `SCScreenshotManager` thumbnail asynchronously at approximately 44pt high and cache it briefly so opening the menu remains responsive.
+Give each thumbnail a subtle adaptive backdrop and hairline border so dark or low-content windows remain recognizable in either menu appearance.
 
 Window titles can be long. Do not truncate manually; let AppKit elide. But cap the app-plus-title string is unnecessary since the menu width handles it.
 
@@ -281,9 +308,10 @@ Provide all standard `AppIcon.appiconset` sizes (16, 32, 128, 256, 512 at 1x and
 
 ### 4.2 Menu bar template icon and app glyph
 
-The menu bar uses SF Symbols (`pin` / `pin.fill`) as specified in section 1, because a custom template must be monochrome and hairline-legible, and the system pin symbol already communicates the function perfectly at menu bar size.
-
-For the hover wordmark (section 3.2) and About panel, a small custom **Buoy glyph** is used: a single-color, flat-shaded version of the app icon's buoy silhouette - capsule body with a two-band split rendered as one notch, mast, and a filled lamp circle with three short radiating lines (beacon rays). Ship it as a template PDF/SVG named `BuoyGlyph` in the asset catalog, sized for 12pt and 16pt. It should read cleanly in white-on-dark.
+The menu bar, hover strip, and About panel use the same programmatically drawn Tidemark geometry specified in section 1.
+It is a pure-alpha template image with no baked color.
+The active menu-bar variant adds a subtle centered dot in the waterline gap, while the hover strip and About panel use the idle mark.
+The AppIcon asset catalog remains unchanged and continues to provide the Finder and application icon.
 
 ---
 
@@ -322,18 +350,19 @@ Suppress this alert if the source window was closing anyway (covered by 5.2).
 
 ### 5.4 Hotkey could not resolve a frontmost window
 
-When `⌥⌘P` (or the menu item "Pin Frontmost Window") fires but there is no eligible frontmost window (Buoy's own menu is frontmost, the desktop is focused, or the app has no capturable window):
+When the configured shortcut (or the menu item "Pin Frontmost Window") fires but there is no eligible frontmost window (Buoy's own menu is frontmost, the desktop is focused, or the app has no capturable window):
 
 - `messageText`: `Nothing to pin`
-- `informativeText`: `Buoy could not find a window to pin. Click the window you want on top, then press Option-Command-P.`
+- `informativeText`: `Buoy could not find a window to pin. Click the window you want on top, then use your Pin Frontmost Window shortcut.`
 - Buttons: `OK`
 - Style: `.informational`
 
-Note the copy spells out the hotkey as `Option-Command-P` in prose (per the no-symbol-in-sentences convention), while the menu shows the `⌥⌘P` glyphs.
+The menu shows the current binding using AppKit's native key-equivalent column.
+The default is `⌥⇧P`, but the alert remains correct after customization or clearing.
 
 ### 5.5 Already pinned (frontmost)
 
-If the frontmost window is already pinned when `⌥⌘P` is pressed, treat it as a toggle: unpin it.
+If the frontmost window is already pinned when the command is invoked, treat it as a toggle: unpin it.
 This makes the hotkey a true pin/unpin.
 No alert.
 This matches the task brief ("pins/unpins the frontmost window").
@@ -356,7 +385,7 @@ This matches the current code shape: `offerFirstLaunchScreenRecordingSetup()` on
 
 ### 6.2 First-run flow, step by step
 
-1. **Launch.** No window appears. The Buoy pin (`pin`) shows in the menu bar. The app is `.accessory`, so no Dock icon, no app switcher entry.
+1. **Launch.** No window appears. The Tidemark mark shows in the menu bar. The app is `.accessory`, so no Dock icon, no app switcher entry.
 2. **Screen Recording primer** fires immediately (`offerFirstLaunchScreenRecordingSetup`), but only if not already granted and not previously offered.
    - Title: `Let Buoy see your windows`
    - Body: `Buoy floats a live copy of any window you pick. To do that, macOS needs to grant Screen Recording. Buoy only mirrors the windows you choose, and nothing leaves your Mac.`
@@ -368,9 +397,9 @@ This matches the current code shape: `offerFirstLaunchScreenRecordingSetup()` on
    - Body: `Turn on Buoy under Privacy & Security, Screen Recording. macOS may ask you to quit and reopen Buoy once you do.`
    - Buttons: `Open Settings` (default) / `Later`
    - `Open Settings` deep-links to `x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture`.
-5. **User picks a window** from "Pin a Window".
-   - If they pick a normal item: pin in place is requested. This is the first pin-in-place, so the **Accessibility primer** fires now (section 6.3).
-   - If they Option-pick (Float): no Accessibility needed; the float appears immediately.
+5. **User picks a window** with the picker, a Recent row, or Choose from List.
+   - A normal click requests pin in place. On the first attempt, the **Accessibility primer** fires now (section 6.3).
+   - An Option-click in the picker or list requests Float. No Accessibility permission is needed.
 6. **Live float appears.** First success.
 
 ### 6.3 Accessibility primer (lazy, on first pin-in-place)
@@ -385,7 +414,7 @@ Shown by `ensureAccessibilityAccess()` the first time a pin-in-place is attempte
 
 The body's mention of the Option-to-float escape hatch is important: it turns a permission wall into a choice and preserves zero-config success for the privacy-conscious.
 
-### 6.4 Permissions status surface (menu item "Permissions…")
+### 6.4 Permissions status surface (menu item "Permissions...")
 
 Replaces the current three-button alert with a clearer status read-out.
 
@@ -405,12 +434,23 @@ Copy change: drop the current line `Accessibility is not needed yet, but will su
 
 ### 6.5 Discoverability hint (Option to float)
 
-Two placements, one message:
+Three placements teach the same gesture in context:
 
-1. In the "Pin a Window" submenu header (section 2.3): `Hold Option to float instead`.
-2. In the Accessibility primer body (section 6.3), as the escape hatch.
+1. The picker tag says `Click to pin - hold Option to float - Esc to cancel`.
+2. The Choose from List submenu header says `Hold Option to float instead`.
+3. The Accessibility primer explains that holding Option floats without Accessibility access.
 
-Do not add a separate coach-mark or tooltip; the submenu header is seen exactly when the choice is relevant, which is the right teaching moment.
+Do not add a separate onboarding coach mark.
+
+### 6.6 Shortcut settings
+
+`Settings...` opens a small regular window titled `Buoy Settings` and activates Buoy.
+It contains one native shortcut recorder for `Pin Frontmost Window`, plus `Reset to Default` and `Clear` buttons.
+The default is Option-Shift-P.
+When armed, the recorder captures the next key-down event containing at least one modifier and displays standard symbols such as `⌥⇧P` or `⌃⇧K`.
+Escape cancels recording, `Clear` disables the global shortcut, and `Reset to Default` restores Option-Shift-P.
+Changes persist immediately and re-register the Carbon hotkey without relaunching.
+The status menu and control window update from the same persisted binding.
 
 ---
 
@@ -418,14 +458,17 @@ Do not add a separate coach-mark or tooltip; the submenu header is seen exactly 
 
 Menu items:
 
-- `Pin a Window`
+- `Pin Frontmost Window`
+- `Pin a Window...`
+- `Choose from List`
+- `Recent`
 - `Hold Option to float instead`
 - `{App} - {Window Title}`
 - `Float {App} - {Window Title}`
 - `Active Pins`
 - `None yet`
-- `Pin Frontmost Window`
-- `Permissions…`
+- `Settings...`
+- `Permissions...`
 - `About Buoy`
 - `Quit Buoy`
 
@@ -442,6 +485,19 @@ Submenu empty/error states:
 - `No windows to pin`
 - `Turn on Screen Recording to pin windows`
 - `Open Screen Recording Settings…`
+
+Picker:
+
+- `Click to pin - hold Option to float - Esc to cancel`
+
+Settings:
+
+- `Buoy Settings`
+- `Pin Frontmost Window`
+- `Click the field, then press a shortcut.`
+- `Type Shortcut`
+- `Reset to Default`
+- `Clear`
 
 Panel:
 
@@ -463,7 +519,7 @@ Errors:
 
 - `Could not pin that window` / `Buoy could not start a live mirror for this window. It may have closed or blocked screen capture. Try another window.`
 - `Lost the connection to that window` / `Buoy stopped mirroring because the window is no longer available. Pin it again to bring it back.`
-- `Nothing to pin` / `Buoy could not find a window to pin. Click the window you want on top, then press Option-Command-P.`
+- `Nothing to pin` / `Buoy could not find a window to pin. Click the window you want on top, then use your Pin Frontmost Window shortcut.`
 
 Buttons: `Continue`, `Not Now`, `Open Settings`, `Later`, `Open Screen Recording`, `Open Accessibility`, `Done`, `OK`.
 
@@ -471,10 +527,11 @@ Buttons: `Continue`, `Not Now`, `Open Settings`, `Later`, `Open Screen Recording
 
 ## 8. Design rationale and tradeoffs
 
-- **Filled vs outline menu bar icon over a badge.** A colored dot or count badge would be louder and less native. Swapping `pin` to `pin.fill` conveys "active" with zero color, matching how system menu extras behave. Tradeoff: the difference is subtle, but the tooltip count backstops it.
+- **Tidemark active dot over a badge.** A colored badge or count would be louder than a native menu extra. One small dot in the negative-space waterline emphasizes the custom mark without changing its silhouette, and the tooltip carries the count.
+- **Picker before a long window list.** Pointing at a visible window is faster than recognizing it in a text menu. The list remains available for keyboard and title-driven selection, while thumbnails reduce ambiguity.
 - **Per-pin submenu vs flat rows.** The current build lists each pin as a single flat "Unpin …" row. That has no room for opacity or click-through. Nesting controls in a per-pin submenu keeps the top level to one line per pin while unlocking the per-pin opacity and detached-only click-through the product promises. Tradeoff: one extra hover to reach unpin, mitigated by keeping the panel's own close button as the fast path.
 - **Lazy Accessibility, eager Screen Recording.** Detailed in 6.1. The core bet: never ask for a permission a given user will not use. This protects trust and keeps the pure-float path truly single-permission.
 - **Honest mirror via hover wordmark, not a persistent badge.** A permanent "Buoy" badge on every pin would be visual noise on a tool whose whole point is an unobtrusive floating copy. The hairline border gives a constant quiet signal; the hover wordmark gives an explicit one on demand. Tradeoff: at rest there is no literal label, but the border plus the fact that the user just created the pin makes misidentification unlikely, and hover resolves any doubt.
 - **"Paused" over "Frozen".** When capture stalls (commonly a minimized source), the last frame plus a soft "Paused" pill communicates "temporary, will resume" rather than "broken". Dimming reinforces "not live" without hiding useful context.
-- **No preferences window.** Everything configurable (opacity, click-through, mode) lives where the object it affects lives: in the pin's own submenu or on the panel. This keeps to the zero-configuration principle and removes an entire surface to design and maintain.
+- **One focused Settings window.** Per-pin controls stay with each pin, while the one global preference, the shortcut, lives in a small dedicated window. The useful default means users never need to open it.
 - **Option-to-float taught in-context.** Rather than an onboarding tour, the one non-obvious gesture is surfaced exactly where and when it matters: the submenu header and the Accessibility wall. This respects the terse, native ethos and avoids modal onboarding.

@@ -2,9 +2,23 @@ import AppKit
 
 @MainActor
 final class PinPreferences {
+    struct RecentWindowIdentity: Codable, Equatable {
+        let appIdentifier: String
+        let appName: String
+        let windowTitle: String
+    }
+
     static let shared = PinPreferences()
 
     private let defaults = UserDefaults.standard
+
+    private enum Key {
+        static let hotkeyEnabled = "hotkey.enabled"
+        static let hotkeyKeyCode = "hotkey.keyCode"
+        static let hotkeyModifiers = "hotkey.modifiers"
+        static let hotkeyEquivalent = "hotkey.keyEquivalent"
+        static let recentWindows = "pin.recentWindows"
+    }
 
     private init() {}
 
@@ -30,6 +44,52 @@ final class PinPreferences {
     func setDetachedFrame(_ frame: CGRect, for source: WindowDescriptor) {
         guard frame.width > 1, frame.height > 1 else { return }
         defaults.set(NSStringFromRect(frame), forKey: geometryKey(for: source))
+    }
+
+    var hotkeyBinding: HotkeyBinding? {
+        guard defaults.object(forKey: Key.hotkeyEnabled) != nil else {
+            return .defaultBinding
+        }
+        guard defaults.bool(forKey: Key.hotkeyEnabled) else { return nil }
+        let keyCode = UInt32(defaults.integer(forKey: Key.hotkeyKeyCode))
+        let modifierRawValue = UInt(defaults.object(forKey: Key.hotkeyModifiers) as? NSNumber != nil
+            ? defaults.integer(forKey: Key.hotkeyModifiers)
+            : Int(HotkeyBinding.defaultBinding.modifiers.rawValue))
+        let equivalent = defaults.string(forKey: Key.hotkeyEquivalent) ?? "p"
+        return HotkeyBinding(
+            keyCode: keyCode,
+            modifiers: NSEvent.ModifierFlags(rawValue: modifierRawValue),
+            keyEquivalent: equivalent
+        )
+    }
+
+    func setHotkeyBinding(_ binding: HotkeyBinding?) {
+        defaults.set(binding != nil, forKey: Key.hotkeyEnabled)
+        if let binding {
+            defaults.set(Int(binding.keyCode), forKey: Key.hotkeyKeyCode)
+            defaults.set(Int(binding.modifiers.rawValue), forKey: Key.hotkeyModifiers)
+            defaults.set(binding.keyEquivalent, forKey: Key.hotkeyEquivalent)
+        }
+        NotificationCenter.default.post(name: .buoyHotkeyChanged, object: self)
+    }
+
+    var recentWindows: [RecentWindowIdentity] {
+        guard let data = defaults.data(forKey: Key.recentWindows) else { return [] }
+        return (try? JSONDecoder().decode([RecentWindowIdentity].self, from: data)) ?? []
+    }
+
+    func recordRecent(_ source: WindowDescriptor) {
+        let identity = RecentWindowIdentity(
+            appIdentifier: source.persistenceAppIdentifier,
+            appName: source.owningAppName,
+            windowTitle: source.displayTitle
+        )
+        var values = recentWindows.filter { $0 != identity }
+        values.insert(identity, at: 0)
+        values = Array(values.prefix(12))
+        if let data = try? JSONEncoder().encode(values) {
+            defaults.set(data, forKey: Key.recentWindows)
+        }
     }
 
     private func opacityKey(for source: WindowDescriptor) -> String {
@@ -59,3 +119,6 @@ final class PinPreferences {
     }
 }
 
+extension Notification.Name {
+    static let buoyHotkeyChanged = Notification.Name("Buoy.hotkeyChanged")
+}

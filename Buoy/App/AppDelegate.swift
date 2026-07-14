@@ -20,8 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let controller = ControlWindowController(
                 pinManager: pinManager,
                 permissionsManager: permissionsManager,
-                hotkeyIsInstalled: { [weak statusController] in
-                    statusController?.isHotkeyInstalled ?? false
+                hotkeyStatus: { [weak statusController] in
+                    statusController?.hotkeyStatusText ?? "Unavailable"
                 }
             )
             controlWindowController = controller
