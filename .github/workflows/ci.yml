@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    # The project file uses objectVersion 77, which requires Xcode 16 or later.
+    # macos-15 images ship Xcode 16+ by default; keep the runner at 15 or newer.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Xcode version
+        run: xcodebuild -version
+      - name: Build
+        run: |
+          xcodebuild \
+            -project Buoy.xcodeproj \
+            -scheme Buoy \
+            -configuration Release \
+            -destination "platform=macOS,arch=arm64" \
+            -derivedDataPath ./build/DerivedData \
+            build \
+            CODE_SIGNING_ALLOWED=NO
