@@ -388,7 +388,7 @@ private func copyElementAttribute(
           let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
         return nil
     }
-    return value as! AXUIElement
+    return unsafeDowncast(value, to: AXUIElement.self)
 }
 
 private func copyStringAttribute(
