@@ -20,6 +20,7 @@ final class PinSession: NSObject, NSWindowDelegate {
     let panel: PinOverlayPanel
     let mode: PinMode
     var onSourceClosed: (() -> Void)?
+    var onCaptureFailed: ((Error) -> Void)?
 
     private var windowTracker: WindowTracker?
     private var interactionRouter: InteractionRouter?
@@ -28,6 +29,8 @@ final class PinSession: NSObject, NSWindowDelegate {
     private var sourceIsMinimized = false
     private var captureIsStalled = false
     private var geometrySaveTimer: Timer?
+    private var captureFailureWorkItem: DispatchWorkItem?
+    private var sourceHasClosed = false
     private(set) var isClickThrough = false
 
     var opacity: CGFloat {
@@ -45,6 +48,7 @@ final class PinSession: NSObject, NSWindowDelegate {
         panel = PinOverlayPanel(
             sourceFrame: source.frame,
             title: "\(source.owningAppName) - \(source.displayTitle)",
+            sourceAppName: source.owningAppName,
             mode: mode
         )
         panel.alphaValue = opacity
@@ -58,14 +62,17 @@ final class PinSession: NSObject, NSWindowDelegate {
         if mode == .detached {
             panel.delegate = self
         }
+        panel.onShowRealWindow = { [weak self] in
+            self?.showRealWindow()
+        }
     }
 
     func start() async throws {
         capture.onFrameDelivered = { [weak self] in
             self?.handleFrameDelivered()
         }
-        capture.onError = { [weak self] _ in
-            self?.setCaptureStalled(true)
+        capture.onError = { [weak self] error in
+            self?.handleCaptureFailure(error)
         }
         try await capture.start(window: source.window)
 
@@ -79,6 +86,9 @@ final class PinSession: NSObject, NSWindowDelegate {
             self?.handleMinimizedChanged(isMinimized)
         }
         tracker.onWindowClosed = { [weak self] in
+            self?.sourceHasClosed = true
+            self?.captureFailureWorkItem?.cancel()
+            self?.captureFailureWorkItem = nil
             self?.onSourceClosed?()
         }
         tracker.startTracking()
@@ -103,6 +113,8 @@ final class PinSession: NSObject, NSWindowDelegate {
         savePersistentState()
         stallTimer?.invalidate()
         stallTimer = nil
+        captureFailureWorkItem?.cancel()
+        captureFailureWorkItem = nil
         geometrySaveTimer?.invalidate()
         geometrySaveTimer = nil
         interactionRouter?.stopRouting()
@@ -120,6 +132,16 @@ final class PinSession: NSObject, NSWindowDelegate {
         guard mode == .detached else { return }
         isClickThrough = enabled
         panel.ignoresMouseEvents = enabled
+    }
+
+    func showRealWindow() {
+        if mode == .pinnedInPlace {
+            interactionRouter?.showRealWindow()
+            return
+        }
+
+        NSRunningApplication(processIdentifier: source.processID)?.activate(options: [.activateAllWindows])
+        _ = windowTracker?.raiseSourceWindow()
     }
 
     func savePersistentState() {
@@ -141,6 +163,21 @@ final class PinSession: NSObject, NSWindowDelegate {
         if captureIsStalled {
             setCaptureStalled(false)
         }
+    }
+
+    private func handleCaptureFailure(_ error: Error) {
+        setCaptureStalled(true)
+        captureFailureWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            MainActor.assumeIsolated {
+                guard !self.sourceHasClosed else { return }
+                self.onCaptureFailed?(error)
+            }
+        }
+        captureFailureWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: workItem)
     }
 
     private func handleMinimizedChanged(_ isMinimized: Bool) {

@@ -7,11 +7,7 @@ final class OpacityMenuItemView: NSView {
 
     init(session: PinSession) {
         self.session = session
-        super.init(frame: NSRect(x: 0, y: 0, width: 244, height: 52))
-
-        let titleLabel = NSTextField(labelWithString: "Opacity")
-        titleLabel.font = .menuFont(ofSize: 0)
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        super.init(frame: NSRect(x: 0, y: 0, width: 260, height: 34))
 
         valueLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
         valueLabel.textColor = .secondaryLabelColor
@@ -28,20 +24,17 @@ final class OpacityMenuItemView: NSView {
         slider.isContinuous = true
         slider.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(titleLabel)
         addSubview(valueLabel)
         addSubview(slider)
         updateValueLabel(session.opacity)
 
         NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 7),
             valueLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            valueLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
-            valueLabel.leadingAnchor.constraint(greaterThanOrEqualTo: titleLabel.trailingAnchor, constant: 8),
-            slider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            slider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            slider.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            valueLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            valueLabel.widthAnchor.constraint(equalToConstant: 38),
+            slider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 21),
+            slider.trailingAnchor.constraint(equalTo: valueLabel.leadingAnchor, constant: -8),
+            slider.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
 
@@ -56,7 +49,7 @@ final class OpacityMenuItemView: NSView {
     }
 
     private func updateValueLabel(_ opacity: CGFloat) {
-        valueLabel.stringValue = "\(Int((opacity * 100).rounded()))%"
+        let percentage = max(15, Int((opacity * 20).rounded()) * 5)
+        valueLabel.stringValue = "\(percentage)%"
     }
 }
-

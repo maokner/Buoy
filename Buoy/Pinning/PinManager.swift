@@ -6,6 +6,7 @@ final class PinManager {
 
     private(set) var sessions: [PinSession] = []
     var onSessionsChanged: (() -> Void)?
+    var onUnexpectedCaptureFailure: (() -> Void)?
 
     private init() {}
 
@@ -21,6 +22,15 @@ final class PinManager {
         session.onSourceClosed = { [weak self, weak session] in
             guard let session else { return }
             self?.unpin(sessionID: session.id)
+        }
+        session.onCaptureFailed = { [weak self, weak session] error in
+            guard let self, let session,
+                  self.sessions.contains(where: { $0.id == session.id }) else {
+                return
+            }
+            NSLog("Buoy lost capture for window %u: %@", session.source.windowID, error.localizedDescription)
+            self.unpin(sessionID: session.id)
+            self.onUnexpectedCaptureFailure?()
         }
 
         do {

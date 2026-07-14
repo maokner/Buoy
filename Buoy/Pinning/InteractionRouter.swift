@@ -60,6 +60,10 @@ final class InteractionRouter: InteractionRouting {
         }
     }
 
+    func showRealWindow() {
+        interceptMouseDown()
+    }
+
     private func interceptMouseDown() {
         guard !raiseInProgress else { return }
         raiseInProgress = true

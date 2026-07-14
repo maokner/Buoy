@@ -48,17 +48,23 @@ final class PermissionsManager {
         guard !UserDefaults.standard.bool(forKey: firstLaunchPromptKey) else { return }
 
         UserDefaults.standard.set(true, forKey: firstLaunchPromptKey)
-        presentScreenRecordingPrompt(
-            message: "To make a window float, Buoy needs Screen Recording access. Buoy only captures windows you choose."
-        )
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Let Buoy see your windows"
+        alert.informativeText = "Buoy floats a live copy of any window you pick. To do that, macOS needs to grant Screen Recording. Buoy only mirrors the windows you choose, and nothing leaves your Mac."
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Not Now")
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if !requestScreenRecordingAccess() && !hasScreenRecordingAccess {
+            presentScreenRecordingOffAlert()
+        }
     }
 
     func ensureScreenRecordingAccess() -> Bool {
         guard !hasScreenRecordingAccess else { return true }
-
-        presentScreenRecordingPrompt(
-            message: "Buoy needs Screen Recording access before it can create a live window mirror."
-        )
+        presentScreenRecordingOffAlert()
         return hasScreenRecordingAccess
     }
 
@@ -67,8 +73,8 @@ final class PermissionsManager {
 
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "Allow Accessibility"
-        alert.informativeText = "Pin in Place needs Accessibility access to track and raise the window you choose. Detached floats do not need this permission."
+        alert.messageText = "Buoy needs one more thing to pin in place"
+        alert.informativeText = "Pinning in place lets Buoy raise and follow the real window as it moves. That needs Accessibility access. Floating windows do not - if you would rather not grant this, hold Option when picking a window to float it instead."
         alert.addButton(withTitle: "Open Settings")
         alert.addButton(withTitle: "Not Now")
 
@@ -82,53 +88,57 @@ final class PermissionsManager {
     }
 
     func presentPermissions() {
+        let screenGranted = hasScreenRecordingAccess
+        let accessibilityGranted = hasAccessibilityAccess
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = "Buoy Permissions"
-        alert.informativeText = "Screen Recording: \(status(hasScreenRecordingAccess))\nAccessibility: \(status(hasAccessibilityAccess))\n\nAccessibility is not needed yet, but will support window tracking in a later phase."
-        alert.addButton(withTitle: "Screen Recording")
-        alert.addButton(withTitle: "Accessibility")
-        alert.addButton(withTitle: "Cancel")
+        var body = "Screen Recording - \(status(screenGranted)). Required to mirror any window.\nAccessibility - \(status(accessibilityGranted)). Needed only for Pin in Place."
+        if screenGranted && accessibilityGranted {
+            body += "\n\nEverything Buoy needs is enabled."
+        }
+        alert.informativeText = body
+
+        if !screenGranted {
+            alert.addButton(withTitle: "Open Screen Recording")
+            alert.addButton(withTitle: "Open Accessibility")
+            alert.addButton(withTitle: "Done")
+        } else if !accessibilityGranted {
+            alert.addButton(withTitle: "Open Accessibility")
+            alert.addButton(withTitle: "Open Screen Recording")
+            alert.addButton(withTitle: "Done")
+        } else {
+            alert.addButton(withTitle: "Done")
+        }
 
         NSApp.activate(ignoringOtherApps: true)
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            if hasScreenRecordingAccess {
+        let response = alert.runModal()
+        if !screenGranted {
+            if response == .alertFirstButtonReturn {
                 openScreenRecordingSettings()
-            } else {
-                _ = requestScreenRecordingAccess()
-                if !hasScreenRecordingAccess {
-                    openScreenRecordingSettings()
-                }
+            } else if response == .alertSecondButtonReturn {
+                openAccessibilitySettings()
             }
-        case .alertSecondButtonReturn:
-            openAccessibilitySettings()
-        default:
-            break
+        } else if !accessibilityGranted {
+            if response == .alertFirstButtonReturn {
+                openAccessibilitySettings()
+            } else if response == .alertSecondButtonReturn {
+                openScreenRecordingSettings()
+            }
         }
     }
 
-    private func presentScreenRecordingPrompt(message: String) {
+    private func presentScreenRecordingOffAlert() {
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "Allow Screen Recording"
-        alert.informativeText = message
-        alert.addButton(withTitle: "Grant Access")
-        alert.addButton(withTitle: "Not Now")
+        alert.messageText = "Screen Recording is off"
+        alert.informativeText = "Turn on Buoy under Privacy & Security, Screen Recording. macOS may ask you to quit and reopen Buoy once you do."
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Later")
 
         NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        if !requestScreenRecordingAccess() && !hasScreenRecordingAccess {
-            let settingsAlert = NSAlert()
-            settingsAlert.alertStyle = .informational
-            settingsAlert.messageText = "Open System Settings"
-            settingsAlert.informativeText = "Enable Buoy in Privacy & Security > Screen Recording, then reopen Buoy if macOS asks you to."
-            settingsAlert.addButton(withTitle: "Open Settings")
-            settingsAlert.addButton(withTitle: "Later")
-            if settingsAlert.runModal() == .alertFirstButtonReturn {
-                openScreenRecordingSettings()
-            }
+        if alert.runModal() == .alertFirstButtonReturn {
+            openScreenRecordingSettings()
         }
     }
 
