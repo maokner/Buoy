@@ -20,6 +20,15 @@ final class SampleBufferView: NSView, SampleBufferRendering {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         displayLayer.frame = bounds
+        updateContentsScale()
+        CATransaction.commit()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        updateContentsScale()
         CATransaction.commit()
     }
 
@@ -39,7 +48,13 @@ final class SampleBufferView: NSView, SampleBufferRendering {
         layer?.backgroundColor = NSColor.black.cgColor
         displayLayer.videoGravity = .resizeAspect
         displayLayer.backgroundColor = NSColor.black.cgColor
+        updateContentsScale()
         layer?.addSublayer(displayLayer)
     }
-}
 
+    private func updateContentsScale() {
+        let scale = max(window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1, 1)
+        layer?.contentsScale = scale
+        displayLayer.contentsScale = scale
+    }
+}

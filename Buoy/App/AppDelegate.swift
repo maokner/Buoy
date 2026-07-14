@@ -5,14 +5,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let permissionsManager = PermissionsManager.shared
     private let pinManager = PinManager.shared
     private var statusMenuController: StatusMenuController?
+    private var controlWindowController: ControlWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
-        statusMenuController = StatusMenuController(
+        let showsControlWindow = ProcessInfo.processInfo.arguments.contains("--control-window")
+        NSApp.setActivationPolicy(showsControlWindow ? .regular : .accessory)
+        let statusController = StatusMenuController(
             pinManager: pinManager,
             permissionsManager: permissionsManager
         )
-        permissionsManager.offerFirstLaunchScreenRecordingSetup()
+        statusMenuController = statusController
+
+        if showsControlWindow {
+            let controller = ControlWindowController(
+                pinManager: pinManager,
+                permissionsManager: permissionsManager,
+                hotkeyIsInstalled: { [weak statusController] in
+                    statusController?.isHotkeyInstalled ?? false
+                }
+            )
+            controlWindowController = controller
+            controller.showWindow(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            permissionsManager.offerFirstLaunchScreenRecordingSetup()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

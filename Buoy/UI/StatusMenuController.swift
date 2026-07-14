@@ -20,6 +20,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     private var enumerationGeneration = 0
     private var windowState: WindowState = .loading
 
+    var isHotkeyInstalled: Bool {
+        hotkeyManager.isInstalled
+    }
+
     init(pinManager: PinManager, permissionsManager: PermissionsManager) {
         self.pinManager = pinManager
         self.permissionsManager = permissionsManager

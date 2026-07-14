@@ -2,16 +2,34 @@ import AppKit
 
 @MainActor
 final class PinManager {
+    enum PinResult {
+        case created
+        case alreadyPinned
+    }
+
     static let shared = PinManager()
 
     private(set) var sessions: [PinSession] = []
     var onSessionsChanged: (() -> Void)?
     var onUnexpectedCaptureFailure: (() -> Void)?
 
+    // Windows with a pin() currently suspended at an await; guards against
+    // reentrant double-pinning (e.g. two fast hotkey presses) before append.
+    private var inFlightWindowIDs: Set<CGWindowID> = []
+
     private init() {}
 
-    func pin(_ window: WindowDescriptor, mode: PinMode = .pinnedInPlace) async throws {
-        guard !sessions.contains(where: { $0.source.windowID == window.windowID }) else { return }
+    @discardableResult
+    func pin(
+        _ window: WindowDescriptor,
+        mode: PinMode = .pinnedInPlace
+    ) async throws -> PinResult {
+        guard !sessions.contains(where: { $0.source.windowID == window.windowID }),
+              !inFlightWindowIDs.contains(window.windowID) else {
+            return .alreadyPinned
+        }
+        inFlightWindowIDs.insert(window.windowID)
+        defer { inFlightWindowIDs.remove(window.windowID) }
 
         let opacity = PinPreferences.shared.opacity(for: window)
         let session = PinSession(source: window, opacity: opacity, mode: mode)
@@ -36,7 +54,8 @@ final class PinManager {
         do {
             try await session.start()
             sessions.append(session)
-            onSessionsChanged?()
+            notifySessionsChanged()
+            return .created
         } catch {
             await session.stop()
             throw error
@@ -47,7 +66,7 @@ final class PinManager {
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
         let session = sessions.remove(at: index)
         session.savePersistentState()
-        onSessionsChanged?()
+        notifySessionsChanged()
         Task { @MainActor in
             await session.stop()
         }
@@ -56,7 +75,7 @@ final class PinManager {
     func stopAll() {
         let activeSessions = sessions
         sessions.removeAll()
-        onSessionsChanged?()
+        notifySessionsChanged()
         for session in activeSessions {
             session.savePersistentState()
             Task { @MainActor in
@@ -73,4 +92,12 @@ final class PinManager {
         sessions.first(where: { $0.source.windowID == windowID })
     }
 
+    private func notifySessionsChanged() {
+        onSessionsChanged?()
+        NotificationCenter.default.post(name: .buoySessionsChanged, object: self)
+    }
+}
+
+extension Notification.Name {
+    static let buoySessionsChanged = Notification.Name("Buoy.sessionsChanged")
 }

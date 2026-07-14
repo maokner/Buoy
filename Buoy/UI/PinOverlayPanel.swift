@@ -18,6 +18,7 @@ final class PinOverlayPanel: NSPanel {
     private var isHovering = false
 
     init(sourceFrame: CGRect, title: String, sourceAppName: String, mode: PinMode) {
+        let isControlWindowRun = ProcessInfo.processInfo.arguments.contains("--control-window")
         let initialFrame = Self.initialPanelFrame(for: sourceFrame, mode: mode)
         let styleMask: NSWindow.StyleMask = mode == .detached
             ? [.borderless, .nonactivatingPanel, .resizable]
@@ -30,10 +31,15 @@ final class PinOverlayPanel: NSPanel {
         )
 
         self.title = title
+        // PinSession owns this panel strongly; enforce that close() never releases it.
+        isReleasedWhenClosed = false
         isFloatingPanel = true
         level = .floating
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        sharingType = .none
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
+        // Production overlays stay out of screenshots to avoid recursive capture.
+        // The explicit control-window launch mode is an E2E surface and must remain
+        // visible to Computer Use so the rendered capture can be verified.
+        sharingType = isControlWindowRun ? .readOnly : .none
         hasShadow = true
         backgroundColor = .clear
         isOpaque = false
@@ -281,8 +287,10 @@ final class PinOverlayPanel: NSPanel {
                 context.duration = 0.2
                 hoverStrip.animator().alphaValue = 0
             }, completionHandler: { [weak self, weak hoverStrip] in
-                guard let self, !self.isHovering else { return }
-                hoverStrip?.isHidden = true
+                MainActor.assumeIsolated {
+                    guard let self, !self.isHovering else { return }
+                    hoverStrip?.isHidden = true
+                }
             })
         }
     }

@@ -71,6 +71,24 @@ cd Buoy
 xcodebuild -project Buoy.xcodeproj -scheme Buoy -configuration Release build
 ```
 
+For regular local use, install a stable signed copy instead of launching a new ad hoc build from DerivedData each time.
+This keeps macOS Screen Recording and Accessibility grants attached to the same application identity across rebuilds.
+
+```sh
+./scripts/install-local.sh
+open /Applications/Buoy.app
+```
+
+The installer uses the first Apple Development signing identity available in your login keychain.
+You can create a free personal development identity by signing into Xcode with an Apple Account.
+
+For E2E diagnostics, launch the installed build with its accessible control window.
+This window drives the same production capture and pinning managers as the menu bar interface.
+
+```sh
+open -na /Applications/Buoy.app --args --control-window
+```
+
 ## Credits
 
 The mirror-overlay technique was pioneered in the open-source community; [PinWindow](https://github.com/justwy/PinWindow) (MIT) and [Topit](https://github.com/lihaoyun6/Topit) validated the approach.

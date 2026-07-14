@@ -8,6 +8,9 @@ protocol InteractionRouting: AnyObject {
 
 @MainActor
 final class InteractionRouter: InteractionRouting {
+    var onOverlayHidden: (() -> Void)?
+    var onOverlayWillShow: (() -> Void)?
+
     private let sourceProcessID: pid_t
     private weak var panel: PinOverlayPanel?
     private weak var tracker: WindowTracker?
@@ -45,6 +48,7 @@ final class InteractionRouter: InteractionRouting {
 
         if tracker?.sourceWindowIsFocused() == true {
             overlayIsHidden = true
+            onOverlayHidden?()
             panel?.orderOut(nil)
         } else {
             showOverlay()
@@ -54,6 +58,8 @@ final class InteractionRouter: InteractionRouting {
     func stopRouting() {
         panel?.onInterceptedMouseDown = nil
         tracker?.onFocusChanged = nil
+        onOverlayHidden = nil
+        onOverlayWillShow = nil
         if let activationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
             self.activationObserver = nil
@@ -106,11 +112,13 @@ final class InteractionRouter: InteractionRouting {
     private func hideOverlay() {
         guard !overlayIsHidden else { return }
         overlayIsHidden = true
+        onOverlayHidden?()
         panel?.orderOut(nil)
     }
 
     private func showOverlay() {
         guard overlayIsHidden else { return }
+        onOverlayWillShow?()
         if let frame = tracker?.currentFrame {
             panel?.setFrame(frame, display: true)
         }

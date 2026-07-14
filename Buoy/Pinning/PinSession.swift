@@ -77,9 +77,11 @@ final class PinSession: NSObject, NSWindowDelegate {
         try await capture.start(window: source.window)
 
         let tracker = WindowTracker(source: source)
-        if mode == .pinnedInPlace {
-            tracker.onFrameChanged = { [weak self] frame in
-                self?.panel.setFrame(frame, display: true)
+        tracker.onFrameChanged = { [weak self] frame in
+            guard let self else { return }
+            self.capture.updateSize(to: frame.size, sourceFrame: frame)
+            if self.mode == .pinnedInPlace {
+                self.panel.setFrame(frame, display: true)
             }
         }
         tracker.onMinimizedChanged = { [weak self] isMinimized in
@@ -100,6 +102,12 @@ final class PinSession: NSObject, NSWindowDelegate {
                 panel: panel,
                 tracker: tracker
             )
+            router.onOverlayHidden = { [weak self] in
+                self?.capture.pause()
+            }
+            router.onOverlayWillShow = { [weak self] in
+                self?.capture.resume()
+            }
             router.startRouting()
             interactionRouter = router
         }

@@ -115,6 +115,9 @@ final class WindowTracker: WindowTracking {
     }
 
     func sourceWindowIsFocused() -> Bool? {
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == source.processID else {
+            return false
+        }
         guard let focusedElement = copyElementAttribute(
             applicationElement,
             attribute: kAXFocusedWindowAttribute as CFString
