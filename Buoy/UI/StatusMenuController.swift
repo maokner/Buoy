@@ -22,19 +22,24 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         pinManager: pinManager,
         permissionsManager: permissionsManager
     )
-    private lazy var settingsController = SettingsWindowController(preferences: preferences)
+    private lazy var settingsController = SettingsWindowController(
+        preferences: preferences,
+        onRecordingStateChanged: { [weak self] isRecording in
+            if isRecording {
+                self?.hotkeyManager.suspendAll()
+            } else {
+                self?.hotkeyManager.restoreAll()
+            }
+        }
+    )
     private var availableWindows: [CGWindowID: WindowDescriptor] = [:]
     private var enumerationGeneration = 0
     private var windowState: WindowState = .loading
     private var hotkeyObserver: NSObjectProtocol?
 
-    var isHotkeyInstalled: Bool {
-        hotkeyManager.isInstalled
-    }
-
     var hotkeyStatusText: String {
-        guard let binding = preferences.hotkeyBinding else { return "Disabled" }
-        return hotkeyManager.isInstalled ? binding.displayString : "\(binding.displayString) (Unavailable)"
+        "Pin: \(hotkeyStatus(preferences.pinHotkeyBinding, installed: hotkeyManager.pinIsInstalled)) | "
+            + "Unpin: \(hotkeyStatus(preferences.unpinHotkeyBinding, installed: hotkeyManager.unpinIsInstalled))"
     }
 
     init(pinManager: PinManager, permissionsManager: PermissionsManager) {
@@ -47,10 +52,13 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         menu.autoenablesItems = false
         statusItem.menu = menu
 
-        hotkeyManager.onHotkeyPressed = { [weak self] in
+        hotkeyManager.onPinHotkeyPressed = { [weak self] in
             self?.toggleFrontmostWindow()
         }
-        hotkeyManager.install(binding: preferences.hotkeyBinding)
+        hotkeyManager.onUnpinHotkeyPressed = { [weak self] in
+            self?.unpinActiveWindow()
+        }
+        installHotkeys()
         hotkeyObserver = NotificationCenter.default.addObserver(
             forName: .buoyHotkeyChanged,
             object: preferences,
@@ -58,7 +66,7 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         ) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.hotkeyManager.install(binding: self.preferences.hotkeyBinding)
+                self.installHotkeys()
                 self.buildMenu(windowState: self.windowState)
             }
         }
@@ -113,10 +121,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let frontmostItem = NSMenuItem(
             title: "Pin Frontmost Window",
             action: #selector(toggleFrontmostWindow),
-            keyEquivalent: preferences.hotkeyBinding?.keyEquivalent ?? ""
+            keyEquivalent: preferences.pinHotkeyBinding?.keyEquivalent ?? ""
         )
         frontmostItem.target = self
-        frontmostItem.keyEquivalentModifierMask = preferences.hotkeyBinding?.menuModifierMask ?? []
+        frontmostItem.keyEquivalentModifierMask = preferences.pinHotkeyBinding?.menuModifierMask ?? []
         frontmostItem.image = menuSymbol("pin.badge.plus", description: "Pin Frontmost Window")
         menu.addItem(frontmostItem)
 
@@ -272,26 +280,24 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     private func addActivePins() {
-        menu.addItem(sectionHeader("Active Pins"))
-        guard !pinManager.sessions.isEmpty else {
+        menu.addItem(sectionHeader("Active Pin"))
+        guard let session = pinManager.sessions.first else {
             let noneItem = disabledItem("None yet")
             noneItem.indentationLevel = 1
             menu.addItem(noneItem)
             return
         }
 
-        for session in pinManager.sessions {
-            let item = NSMenuItem(
-                title: "\(session.source.owningAppName) - \(session.source.displayTitle)",
-                action: nil,
-                keyEquivalent: ""
-            )
-            item.indentationLevel = 1
-            let symbolName = session.mode == .pinnedInPlace ? "pin.fill" : "rectangle.on.rectangle"
-            item.image = menuSymbol(symbolName, description: session.mode.menuLabel)
-            item.submenu = activePinSubmenu(for: session)
-            menu.addItem(item)
-        }
+        let item = NSMenuItem(
+            title: "\(session.source.owningAppName) - \(session.source.displayTitle)",
+            action: nil,
+            keyEquivalent: ""
+        )
+        item.indentationLevel = 1
+        let symbolName = session.mode == .pinnedInPlace ? "pin.fill" : "rectangle.on.rectangle"
+        item.image = menuSymbol(symbolName, description: session.mode.menuLabel)
+        item.submenu = activePinSubmenu(for: session)
+        menu.addItem(item)
     }
 
     private func activePinSubmenu(for session: PinSession) -> NSMenu {
@@ -330,10 +336,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let unpinItem = NSMenuItem(
             title: "Unpin",
             action: #selector(unpinWindow(_:)),
-            keyEquivalent: "\u{8}"
+            keyEquivalent: preferences.unpinHotkeyBinding?.keyEquivalent ?? ""
         )
         unpinItem.target = self
-        unpinItem.keyEquivalentModifierMask = []
+        unpinItem.keyEquivalentModifierMask = preferences.unpinHotkeyBinding?.menuModifierMask ?? []
         unpinItem.representedObject = session.id.uuidString
         unpinItem.image = menuSymbol("pin.slash", description: "Unpin")
         submenu.addItem(unpinItem)
@@ -344,6 +350,18 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
         let pinCount = pinManager.sessions.count
         statusItem.button?.image = BuoyGlyph.image(pointSize: 18, active: pinCount > 0)
         statusItem.button?.toolTip = pinCount == 0 ? "Buoy" : "Buoy - \(pinCount) pinned"
+    }
+
+    private func installHotkeys() {
+        hotkeyManager.install(
+            pinBinding: preferences.pinHotkeyBinding,
+            unpinBinding: preferences.unpinHotkeyBinding
+        )
+    }
+
+    private func hotkeyStatus(_ binding: HotkeyBinding?, installed: Bool) -> String {
+        guard let binding else { return "Disabled" }
+        return installed ? binding.displayString : "\(binding.displayString) (Unavailable)"
     }
 
     private func menuSymbol(_ name: String, description: String) -> NSImage? {
@@ -407,6 +425,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     @objc private func unpinWindow(_ sender: NSMenuItem) {
         guard let id = sessionID(from: sender) else { return }
         pinManager.unpin(sessionID: id)
+    }
+
+    @objc private func unpinActiveWindow() {
+        guard let session = pinManager.sessions.first else { return }
+        pinManager.unpin(sessionID: session.id)
     }
 
     @objc private func showRealWindow(_ sender: NSMenuItem) {

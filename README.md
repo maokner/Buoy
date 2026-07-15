@@ -24,7 +24,8 @@ The result feels like the real window is always on top, because whenever you int
   Great for keeping an eye on builds, dashboards, or video.
   Supports click-through, remembers its position and opacity per app.
 - **Point-and-click picker**: Choose **Pin a Window...**, point at any visible window, and click. Hold Option while clicking for a detached float.
-- **Global hotkey**: Option-Shift-P pins or unpins whatever window you are using by default. Change or disable it in **Settings...**.
+- **Single active pin**: pinning a different window cleanly replaces the current pin, so Buoy always manages one window at a time.
+- **Global hotkeys**: Option-Shift-P pins or toggles the frontmost window. Option-Shift-U unpins the active window from anywhere. Change or disable either shortcut in **Settings...**.
 - **Per-pin opacity** from the menu bar, live.
 
 ## Install

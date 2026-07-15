@@ -6,10 +6,16 @@ struct HotkeyBinding: Equatable {
     let modifiers: NSEvent.ModifierFlags
     let keyEquivalent: String
 
-    static let defaultBinding = HotkeyBinding(
+    static let defaultPinBinding = HotkeyBinding(
         keyCode: UInt32(kVK_ANSI_P),
         modifiers: [.option, .shift],
         keyEquivalent: "p"
+    )
+
+    static let defaultUnpinBinding = HotkeyBinding(
+        keyCode: UInt32(kVK_ANSI_U),
+        modifiers: [.option, .shift],
+        keyEquivalent: "u"
     )
 
     var menuModifierMask: NSEvent.ModifierFlags {
@@ -33,6 +39,10 @@ struct HotkeyBinding: Equatable {
         if normalizedModifiers.contains(.command) { result += "⌘" }
         result += displayKey
         return result
+    }
+
+    func conflicts(with other: HotkeyBinding) -> Bool {
+        keyCode == other.keyCode && normalizedModifiers == other.normalizedModifiers
     }
 
     private var normalizedModifiers: NSEvent.ModifierFlags {

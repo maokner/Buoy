@@ -125,10 +125,11 @@ final class WindowPickerController {
                     onWindowUnavailable?()
                     return
                 }
-                try await pinManager.pin(descriptor, mode: mode)
-                if mode == .pinnedInPlace {
+                let result = try await pinManager.pin(descriptor, mode: mode)
+                switch result {
+                case .created where mode == .pinnedInPlace:
                     pinManager.session(forWindowID: descriptor.windowID)?.showRealWindow()
-                } else {
+                case .created, .alreadyPinned:
                     Self.activate(applicationToRestore)
                 }
             } catch {

@@ -16,6 +16,9 @@ final class PinManager {
     // Windows with a pin() currently suspended at an await; guards against
     // reentrant double-pinning (e.g. two fast hotkey presses) before append.
     private var inFlightWindowIDs: Set<CGWindowID> = []
+    private var pinOperationIsRunning = false
+    private var pinOperationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var pendingSessionStop: Task<Void, Never>?
 
     private init() {}
 
@@ -30,6 +33,29 @@ final class PinManager {
         }
         inFlightWindowIDs.insert(window.windowID)
         defer { inFlightWindowIDs.remove(window.windowID) }
+
+        await acquirePinOperation()
+        defer { releasePinOperation() }
+
+        // An explicit unpin removes its session from the UI immediately, but
+        // its capture may still be stopping. Never overlap that teardown with
+        // the next session startup.
+        if let pendingSessionStop {
+            await pendingSessionStop.value
+        }
+
+        // Another serialized request may have pinned this window while this
+        // request was waiting. Keeping the existing session is the no-op path.
+        guard !sessions.contains(where: { $0.source.windowID == window.windowID }) else {
+            return .alreadyPinned
+        }
+
+        if let existingSession = sessions.first {
+            sessions.removeAll()
+            existingSession.savePersistentState()
+            notifySessionsChanged()
+            await existingSession.stop()
+        }
 
         let opacity = PinPreferences.shared.opacity(for: window)
         let session = PinSession(source: window, opacity: opacity, mode: mode)
@@ -53,7 +79,7 @@ final class PinManager {
 
         do {
             try await session.start()
-            sessions.append(session)
+            sessions = [session]
             PinPreferences.shared.recordRecent(window)
             notifySessionsChanged()
             return .created
@@ -68,9 +94,7 @@ final class PinManager {
         let session = sessions.remove(at: index)
         session.savePersistentState()
         notifySessionsChanged()
-        Task { @MainActor in
-            await session.stop()
-        }
+        enqueueStop(session)
     }
 
     func stopAll() {
@@ -79,9 +103,7 @@ final class PinManager {
         notifySessionsChanged()
         for session in activeSessions {
             session.savePersistentState()
-            Task { @MainActor in
-                await session.stop()
-            }
+            enqueueStop(session)
         }
     }
 
@@ -96,6 +118,34 @@ final class PinManager {
     private func notifySessionsChanged() {
         onSessionsChanged?()
         NotificationCenter.default.post(name: .buoySessionsChanged, object: self)
+    }
+
+    private func acquirePinOperation() async {
+        if !pinOperationIsRunning {
+            pinOperationIsRunning = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            pinOperationWaiters.append(continuation)
+        }
+    }
+
+    private func releasePinOperation() {
+        guard !pinOperationWaiters.isEmpty else {
+            pinOperationIsRunning = false
+            return
+        }
+        pinOperationWaiters.removeFirst().resume()
+    }
+
+    private func enqueueStop(_ session: PinSession) {
+        let precedingStop = pendingSessionStop
+        pendingSessionStop = Task { @MainActor in
+            if let precedingStop {
+                await precedingStop.value
+            }
+            await session.stop()
+        }
     }
 }
 

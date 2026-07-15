@@ -9,12 +9,16 @@ final class ShortcutRecorderControl: NSView {
         }
     }
     var onBindingRecorded: ((HotkeyBinding) -> Void)?
+    var onRecordingStateChanged: ((Bool) -> Void)?
 
     private var eventMonitor: Any?
-    private var isArmed = false {
+    private(set) var isArmed = false {
         didSet {
             needsDisplay = true
             setAccessibilityHelp(isArmed ? "Press a shortcut, or Escape to cancel." : "Press to record a new global shortcut.")
+            if oldValue != isArmed {
+                onRecordingStateChanged?(isArmed)
+            }
         }
     }
 
@@ -36,8 +40,12 @@ final class ShortcutRecorderControl: NSView {
     }
 
     override func resignFirstResponder() -> Bool {
-        disarm()
+        cancelRecording()
         return super.resignFirstResponder()
+    }
+
+    func cancelRecording() {
+        disarm()
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -68,6 +76,9 @@ final class ShortcutRecorderControl: NSView {
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             return self.capture(event)
+        }
+        if eventMonitor == nil {
+            disarm()
         }
     }
 

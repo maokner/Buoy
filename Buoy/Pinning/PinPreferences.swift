@@ -17,6 +17,10 @@ final class PinPreferences {
         static let hotkeyKeyCode = "hotkey.keyCode"
         static let hotkeyModifiers = "hotkey.modifiers"
         static let hotkeyEquivalent = "hotkey.keyEquivalent"
+        static let unpinHotkeyEnabled = "unpinHotkey.enabled"
+        static let unpinHotkeyKeyCode = "unpinHotkey.keyCode"
+        static let unpinHotkeyModifiers = "unpinHotkey.modifiers"
+        static let unpinHotkeyEquivalent = "unpinHotkey.keyEquivalent"
         static let recentWindows = "pin.recentWindows"
     }
 
@@ -46,31 +50,63 @@ final class PinPreferences {
         defaults.set(NSStringFromRect(frame), forKey: geometryKey(for: source))
     }
 
-    var hotkeyBinding: HotkeyBinding? {
-        guard defaults.object(forKey: Key.hotkeyEnabled) != nil else {
-            return .defaultBinding
-        }
-        guard defaults.bool(forKey: Key.hotkeyEnabled) else { return nil }
-        let keyCode = UInt32(defaults.integer(forKey: Key.hotkeyKeyCode))
-        let modifierRawValue = UInt(defaults.object(forKey: Key.hotkeyModifiers) as? NSNumber != nil
-            ? defaults.integer(forKey: Key.hotkeyModifiers)
-            : Int(HotkeyBinding.defaultBinding.modifiers.rawValue))
-        let equivalent = defaults.string(forKey: Key.hotkeyEquivalent) ?? "p"
-        return HotkeyBinding(
-            keyCode: keyCode,
-            modifiers: NSEvent.ModifierFlags(rawValue: modifierRawValue),
-            keyEquivalent: equivalent
+    var pinHotkeyBinding: HotkeyBinding? {
+        binding(
+            enabledKey: Key.hotkeyEnabled,
+            keyCodeKey: Key.hotkeyKeyCode,
+            modifiersKey: Key.hotkeyModifiers,
+            equivalentKey: Key.hotkeyEquivalent,
+            defaultBinding: .defaultPinBinding
         )
     }
 
-    func setHotkeyBinding(_ binding: HotkeyBinding?) {
-        defaults.set(binding != nil, forKey: Key.hotkeyEnabled)
-        if let binding {
-            defaults.set(Int(binding.keyCode), forKey: Key.hotkeyKeyCode)
-            defaults.set(Int(binding.modifiers.rawValue), forKey: Key.hotkeyModifiers)
-            defaults.set(binding.keyEquivalent, forKey: Key.hotkeyEquivalent)
+    var unpinHotkeyBinding: HotkeyBinding? {
+        let candidate = binding(
+            enabledKey: Key.unpinHotkeyEnabled,
+            keyCodeKey: Key.unpinHotkeyKeyCode,
+            modifiersKey: Key.unpinHotkeyModifiers,
+            equivalentKey: Key.unpinHotkeyEquivalent,
+            defaultBinding: .defaultUnpinBinding
+        )
+        // Preserve a pre-Phase 8 custom pin shortcut if it already used the
+        // new unpin default. The user can choose a distinct unpin binding.
+        if defaults.object(forKey: Key.unpinHotkeyEnabled) == nil,
+           let candidate,
+           let pinHotkeyBinding,
+           candidate.conflicts(with: pinHotkeyBinding) {
+            return nil
         }
-        NotificationCenter.default.post(name: .buoyHotkeyChanged, object: self)
+        return candidate
+    }
+
+    @discardableResult
+    func setPinHotkeyBinding(_ binding: HotkeyBinding?) -> Bool {
+        if let binding, let other = unpinHotkeyBinding, binding.conflicts(with: other) {
+            return false
+        }
+        store(
+            binding,
+            enabledKey: Key.hotkeyEnabled,
+            keyCodeKey: Key.hotkeyKeyCode,
+            modifiersKey: Key.hotkeyModifiers,
+            equivalentKey: Key.hotkeyEquivalent
+        )
+        return true
+    }
+
+    @discardableResult
+    func setUnpinHotkeyBinding(_ binding: HotkeyBinding?) -> Bool {
+        if let binding, let other = pinHotkeyBinding, binding.conflicts(with: other) {
+            return false
+        }
+        store(
+            binding,
+            enabledKey: Key.unpinHotkeyEnabled,
+            keyCodeKey: Key.unpinHotkeyKeyCode,
+            modifiersKey: Key.unpinHotkeyModifiers,
+            equivalentKey: Key.unpinHotkeyEquivalent
+        )
+        return true
     }
 
     var recentWindows: [RecentWindowIdentity] {
@@ -94,6 +130,43 @@ final class PinPreferences {
 
     private func opacityKey(for source: WindowDescriptor) -> String {
         "pin.opacity.\(source.persistenceAppIdentifier)"
+    }
+
+    private func binding(
+        enabledKey: String,
+        keyCodeKey: String,
+        modifiersKey: String,
+        equivalentKey: String,
+        defaultBinding: HotkeyBinding
+    ) -> HotkeyBinding? {
+        guard defaults.object(forKey: enabledKey) != nil else { return defaultBinding }
+        guard defaults.bool(forKey: enabledKey) else { return nil }
+        let keyCode = UInt32(defaults.integer(forKey: keyCodeKey))
+        let modifierRawValue = UInt(defaults.object(forKey: modifiersKey) as? NSNumber != nil
+            ? defaults.integer(forKey: modifiersKey)
+            : Int(defaultBinding.modifiers.rawValue))
+        let equivalent = defaults.string(forKey: equivalentKey) ?? defaultBinding.keyEquivalent
+        return HotkeyBinding(
+            keyCode: keyCode,
+            modifiers: NSEvent.ModifierFlags(rawValue: modifierRawValue),
+            keyEquivalent: equivalent
+        )
+    }
+
+    private func store(
+        _ binding: HotkeyBinding?,
+        enabledKey: String,
+        keyCodeKey: String,
+        modifiersKey: String,
+        equivalentKey: String
+    ) {
+        defaults.set(binding != nil, forKey: enabledKey)
+        if let binding {
+            defaults.set(Int(binding.keyCode), forKey: keyCodeKey)
+            defaults.set(Int(binding.modifiers.rawValue), forKey: modifiersKey)
+            defaults.set(binding.keyEquivalent, forKey: equivalentKey)
+        }
+        NotificationCenter.default.post(name: .buoyHotkeyChanged, object: self)
     }
 
     private func geometryKey(for source: WindowDescriptor) -> String {

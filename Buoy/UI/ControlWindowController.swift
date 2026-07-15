@@ -211,7 +211,7 @@ final class ControlWindowController: NSWindowController, NSTableViewDataSource, 
             sectionTitle("Available Windows"),
             availableScroll,
             availableActions,
-            sectionTitle("Active Pins"),
+            sectionTitle("Active Pin"),
             activeScroll,
             activeActions,
             inspectOverlayButton,
@@ -245,7 +245,7 @@ final class ControlWindowController: NSWindowController, NSTableViewDataSource, 
         table.allowsEmptySelection = true
         table.delegate = self
         table.dataSource = self
-        table.setAccessibilityLabel(kind == .available ? "Available windows" : "Active pins")
+        table.setAccessibilityLabel(kind == .available ? "Available windows" : "Active pin")
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
@@ -268,7 +268,7 @@ final class ControlWindowController: NSWindowController, NSTableViewDataSource, 
     private func refreshPermissionState() {
         screenPermissionLabel.stringValue = "Screen Recording: \(permissionsManager.hasScreenRecordingAccess ? "Granted" : "Not Granted")"
         accessibilityPermissionLabel.stringValue = "Accessibility: \(permissionsManager.hasAccessibilityAccess ? "Granted" : "Not Granted")"
-        hotkeyStatusLabel.stringValue = "Global Hotkey: \(hotkeyStatus())"
+        hotkeyStatusLabel.stringValue = "Global Hotkeys: \(hotkeyStatus())"
     }
 
     private func refreshWindows() {

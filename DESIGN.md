@@ -57,7 +57,7 @@ The menu is rebuilt on `menuWillOpen` and whenever sessions change.
 All items use title case per HIG.
 `menu.autoenablesItems = false` stays as-is; disabled rows are informational.
 
-### 2.1 Top-level skeleton (with active pins and recent windows present)
+### 2.1 Top-level skeleton (with an active pin and recent windows present)
 
 ```
 Pin Frontmost Window          ⌥⇧P            [symbol: pin.badge.plus]
@@ -67,9 +67,8 @@ Recent                                        (disabled section header, small)
   Safari - Anthropic                         [symbol: clock]
   Terminal - node                            [symbol: clock]
 ────────────────────────────────────
-Active Pins                                   (disabled section header, small)
-  ◆ Figma - Untitled          ▸              [per-pin submenu, symbol: pin.fill]
-  ◆ Terminal - node           ▸              [per-pin submenu, symbol: rectangle.on.rectangle]
+Active Pin                                    (disabled section header, small)
+  ◆ Figma - Untitled          ▸              [pin submenu, symbol: pin.fill]
 ────────────────────────────────────
 Settings...                                   [symbol: gearshape]
 Permissions...                                [symbol: lock.shield]
@@ -81,8 +80,8 @@ Notes on the skeleton:
 
 - Omit the Recent header and rows when none of the persisted identities match a currently available window.
 - Show no more than three recents, most recently pinned first.
-- The per-pin rows in "Active Pins" carry a leading SF Symbol that encodes the mode: `pin.fill` for pin-in-place, `rectangle.on.rectangle` for detached float.
-- Keep `indentationLevel = 1` on the pin rows under the "Active Pins" header, as the current code does.
+- The row in "Active Pin" carries a leading SF Symbol that encodes the mode: `pin.fill` for pin-in-place, `rectangle.on.rectangle` for detached float.
+- Keep `indentationLevel = 1` on the pin row under the "Active Pin" header.
 
 ### 2.2 Item-by-item spec
 
@@ -93,7 +92,7 @@ Order top to bottom.
 3. **Choose from List** - symbol `list.bullet.rectangle`. Its submenu contains the existing window list and Option alternates (section 2.3.2).
 4. **Recent** - optional disabled header followed by up to three matching windows, newest first. Each row uses `clock` and starts a pin in place.
 5. Separator.
-6. **Active Pins** - disabled header row followed by the per-pin rows (section 2.4) or one disabled `None yet` row.
+6. **Active Pin** - disabled header row followed by the active pin row (section 2.4) or one disabled `None yet` row.
 7. Separator.
 8. **Settings...** - symbol `gearshape`. Opens the shortcut settings window. Use the standard Command-comma menu equivalent.
 9. **Permissions...** - symbol `lock.shield`. Opens the permissions status surface (section 6.4).
@@ -178,12 +177,16 @@ Symbol `arrow.up.forward.app` on that row.
 
 Copy change from current build: `No Available Windows` becomes `No windows to pin`, and `Screen Recording Permission Required` becomes `Turn on Screen Recording to pin windows` (active voice, tells the user what it unlocks).
 
-### 2.4 Per-pin submenu (one per active pin)
+### 2.4 Active pin submenu
 
-Each active pin row is itself a submenu.
-This is where per-pin controls live, keeping the top level flat.
+Buoy has at most one active pin across pin-in-place and detached modes.
+Pinning a different window first saves and fully stops the current session, then starts the new session.
+Choosing the already-pinned window from the picker, list, or Recent is a no-op, while the Pin Frontmost Window shortcut retains its toggle behavior when that pinned window is frontmost.
 
-Row title (the parent item under "Active Pins"): `{App} - {Window Title}`.
+The active pin row is itself a submenu.
+This is where pin controls live, keeping the top level flat.
+
+Row title (the parent item under "Active Pin"): `{App} - {Window Title}`.
 Leading symbol: `pin.fill` (pin in place) or `rectangle.on.rectangle` (detached float).
 
 Submenu contents, top to bottom:
@@ -195,7 +198,7 @@ Opacity                                       (disabled label row)
 ☐ Click-Through                               (detached float only; symbol cursorarrow.rays)
 ────────────────────────────────────
 Show Real Window                              (symbol: arrow.up.left.square)
-Unpin                                  ⌫      (symbol: pin.slash)
+Unpin                                ⌥⇧U      (symbol: pin.slash)
 ```
 
 Details:
@@ -203,14 +206,14 @@ Details:
 - **Opacity**: a labeled section. The label row `Opacity` is a small disabled header. Below it, an `NSSlider` embedded as an `NSMenuItem.view` custom view, range 0.15 to 1.0, continuous, bound to `session.opacity`. To the slider's right, a live percentage label (`100%`, `85%`, …) rounded to the nearest 5%. Minimum shown value is `15%` since the model floor is 0.15. The slider view is inset to match menu content margins (leading 21pt to clear the symbol gutter, trailing 14pt).
 - **Click-Through**: only present when `mode == .detached`. A checkbox item (`item.state`), symbol `cursorarrow.rays`. When on, the panel sets `ignoresMouseEvents = true` so clicks pass to whatever is behind the float. When off, clicking the float activates the source. Not shown for pin-in-place, where click-through would defeat the mode.
 - **Show Real Window**: symbol `arrow.up.left.square`. Raises and focuses the source window (same effect as clicking a pin-in-place mirror). Useful for detached floats too. For a pin-in-place pin this momentarily reveals the native window.
-- **Unpin**: symbol `pin.slash`. Key equivalent `⌫` (delete, `keyEquivalent = "\u{8}"`, no modifier) so it feels like "remove this". Removes the session.
+- **Unpin**: symbol `pin.slash`. The menu key equivalent always reflects the current saved unpin shortcut. The default is `⌥⇧U`, and the item has no key equivalent when the shortcut is cleared. Removes the session.
 
 This is a redesign of the current flat `Unpin {mode}: {App} - {Title}` rows.
 Moving controls into a per-pin submenu is what allows opacity and click-through to exist without cluttering the top level.
 
-### 2.5 Empty state (no active pins)
+### 2.5 Empty state (no active pin)
 
-Under the `Active Pins` header, a single disabled row indented one level:
+Under the `Active Pin` header, a single disabled row indented one level:
 
 ```
 None yet
@@ -367,6 +370,12 @@ This makes the hotkey a true pin/unpin.
 No alert.
 This matches the task brief ("pins/unpins the frontmost window").
 
+### 5.6 Dedicated unpin shortcut
+
+The configured Unpin shortcut removes the active pin regardless of which app or window is frontmost.
+Its default is `⌥⇧U`.
+When there is no active pin, it does nothing and shows no alert.
+
 ---
 
 ## 6. Permissions and first-run flow
@@ -445,12 +454,14 @@ Do not add a separate onboarding coach mark.
 ### 6.6 Shortcut settings
 
 `Settings...` opens a small regular window titled `Buoy Settings` and activates Buoy.
-It contains one native shortcut recorder for `Pin Frontmost Window`, plus `Reset to Default` and `Clear` buttons.
-The default is Option-Shift-P.
+It contains native shortcut recorder rows for `Pin frontmost` and `Unpin`, each with `Reset to Default` and `Clear` buttons.
+The defaults are Option-Shift-P and Option-Shift-U.
 When armed, the recorder captures the next key-down event containing at least one modifier and displays standard symbols such as `⌥⇧P` or `⌃⇧K`.
-Escape cancels recording, `Clear` disables the global shortcut, and `Reset to Default` restores Option-Shift-P.
-Changes persist immediately and re-register the Carbon hotkey without relaunching.
-The status menu and control window update from the same persisted binding.
+Escape cancels recording, `Clear` disables that global shortcut, and `Reset to Default` restores that row's default.
+The two shortcuts cannot use the same key and modifier combination.
+When a recording conflicts, Buoy keeps the old value and shows a brief validation message.
+Changes persist immediately and re-register both Carbon hotkeys without relaunching.
+The status menu and control window update from the same persisted bindings.
 
 ---
 
@@ -465,7 +476,7 @@ Menu items:
 - `Hold Option to float instead`
 - `{App} - {Window Title}`
 - `Float {App} - {Window Title}`
-- `Active Pins`
+- `Active Pin`
 - `None yet`
 - `Settings...`
 - `Permissions...`
@@ -493,8 +504,10 @@ Picker:
 Settings:
 
 - `Buoy Settings`
-- `Pin Frontmost Window`
-- `Click the field, then press a shortcut.`
+- `Keyboard Shortcuts`
+- `Pin frontmost`
+- `Unpin`
+- `Click a field, then press a shortcut. Clear disables that shortcut.`
 - `Type Shortcut`
 - `Reset to Default`
 - `Clear`
@@ -533,5 +546,6 @@ Buttons: `Continue`, `Not Now`, `Open Settings`, `Later`, `Open Screen Recording
 - **Lazy Accessibility, eager Screen Recording.** Detailed in 6.1. The core bet: never ask for a permission a given user will not use. This protects trust and keeps the pure-float path truly single-permission.
 - **Honest mirror via hover wordmark, not a persistent badge.** A permanent "Buoy" badge on every pin would be visual noise on a tool whose whole point is an unobtrusive floating copy. The hairline border gives a constant quiet signal; the hover wordmark gives an explicit one on demand. Tradeoff: at rest there is no literal label, but the border plus the fact that the user just created the pin makes misidentification unlikely, and hover resolves any doubt.
 - **"Paused" over "Frozen".** When capture stalls (commonly a minimized source), the last frame plus a soft "Paused" pill communicates "temporary, will resume" rather than "broken". Dimming reinforces "not live" without hiding useful context.
-- **One focused Settings window.** Per-pin controls stay with each pin, while the one global preference, the shortcut, lives in a small dedicated window. The useful default means users never need to open it.
+- **One focused Settings window.** Pin controls stay with the active pin, while the two global shortcuts live in a small dedicated window. Useful defaults mean users never need to open it.
+- **One pin at a time.** A single active pin keeps the menu predictable and makes the global Unpin shortcut deterministic. Replacement stops the old capture before starting the new one, so capture and tracking resources never overlap.
 - **Option-to-float taught in-context.** Rather than an onboarding tour, the one non-obvious gesture is surfaced exactly where and when it matters: the submenu header and the Accessibility wall. This respects the terse, native ethos and avoids modal onboarding.
