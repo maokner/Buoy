@@ -7,7 +7,7 @@ Keep any window on top of everything else on your Mac, and still use it.
 ## Install
 
 ```sh
-HOMEBREW_CASK_OPTS="--no-quarantine" brew install --cask maokner/tap/buoy
+brew install --cask maokner/tap/buoy
 ```
 
 Or grab `Buoy.dmg` from the [latest release](../../releases/latest) and drag Buoy to Applications.
