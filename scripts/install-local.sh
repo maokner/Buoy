@@ -7,12 +7,15 @@ DERIVED_DATA="${TMPDIR:-/tmp}/BuoyLocalDerivedData"
 PRODUCT="$DERIVED_DATA/Build/Products/Release/Buoy.app"
 DESTINATION="/Applications/Buoy.app"
 
-identity="$({ security find-identity -v -p codesigning || true; } \
-    | awk '/Apple Development:/ { print $2; exit }')"
+# Sign with the stable self-signed "Buoy Self-Signed" identity, the same one
+# release DMGs use. Sharing one identity keeps macOS Screen Recording and
+# Accessibility grants attached across local rebuilds AND released updates.
+# Create it once with scripts/make-signing-cert.sh.
+identity="Buoy Self-Signed"
 
-if [[ -z "$identity" ]]; then
-    echo "No Apple Development signing identity was found in the login keychain." >&2
-    echo "Install or create one in Xcode before building Buoy so macOS can keep its privacy grants stable." >&2
+if ! security find-identity -p codesigning | grep -q "$identity"; then
+    echo "The '$identity' code-signing identity was not found in your keychain." >&2
+    echo "Create it once by running: ./scripts/make-signing-cert.sh" >&2
     exit 1
 fi
 
@@ -27,7 +30,7 @@ xcodebuild \
     CODE_SIGNING_ALLOWED=NO
 
 echo "Signing with the local Apple Development identity…"
-codesign --force --options runtime --sign "$identity" "$PRODUCT"
+codesign --force --sign "$identity" "$PRODUCT"
 codesign --verify --deep --strict --verbose=2 "$PRODUCT"
 
 echo "Installing ${DESTINATION}…"
